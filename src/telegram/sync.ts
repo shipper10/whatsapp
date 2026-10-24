@@ -1,3 +1,4 @@
+import { withRetry } from "../core/retry.js";
 import type { ParseContext } from "./parse.js";
 import { parseMessage } from "./parse.js";
 import type { TelegramStore } from "./store.js";
@@ -21,23 +22,6 @@ export interface SyncStats {
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** Bounded exponential backoff. Honors Telegram FLOOD_WAIT (`seconds`) when present. */
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries: number,
-  sleep: (ms: number) => Promise<void>,
-): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt >= maxRetries) throw err;
-      const flood = (err as { seconds?: number }).seconds;
-      await sleep(flood ? flood * 1000 + 500 : Math.min(30_000, 500 * 2 ** attempt));
-    }
-  }
-}
 
 /**
  * Incremental, idempotent, resumable sync. The cursor (highest message id fully stored) only

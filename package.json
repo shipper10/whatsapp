@@ -16,10 +16,13 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "telegram:login": "tsx scripts/telegram-login.ts"
+    "telegram:login": "tsx scripts/telegram-login.ts",
+    "drive:source": "tsx scripts/drive-source.ts"
   },
   "dependencies": {
+    "@googleapis/drive": "^27.0.0",
     "drizzle-orm": "^0.45.4",
+    "google-auth-library": "^11.3.1",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "teleproto": "^1.232.0",
