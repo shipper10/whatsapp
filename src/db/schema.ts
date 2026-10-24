@@ -87,6 +87,8 @@ export const academicNodes = pgTable(
     nodeType: text("node_type").notNull(),
     name: text("name").notNull(),
     nameNormalized: text("name_normalized").notNull(),
+    /** Stable identity from the source structure (e.g. "tg:<chat>:<index message id>"); null for admin-made nodes. */
+    nodeKey: text("node_key").unique(),
     parentId: integer("parent_id"),
     sortOrder: integer("sort_order").notNull().default(0),
     enabled: boolean("enabled").notNull().default(true),
@@ -98,11 +100,19 @@ export const resources = pgTable(
   "resources",
   {
     id: serial("id").primaryKey(),
+    /** Stable identity ("tg:<chat>:<msg>" or "drive:<source>:<file>") so re-classification updates, never duplicates. */
+    resourceKey: text("resource_key").notNull().unique(),
     displayName: text("display_name").notNull(),
     searchText: text("search_text").notNull().default(""),
     resourceType: text("resource_type").notNull().default("file"),
     academicNodeId: integer("academic_node_id").references(() => academicNodes.id),
     classificationStatus: text("classification_status").notNull().default("uncategorized"),
+    /** True when an admin fixed the classification by hand: sync must not overwrite it. */
+    classificationLocked: boolean("classification_locked").notNull().default(false),
+    /** False when none of the resource's sources exist any more. Rows are never deleted. */
+    isActive: boolean("is_active").notNull().default(true),
+    /** Date of the underlying source item (Telegram message date / Drive modified time) for "recent". */
+    sourceDate: timestamp("source_date", { withTimezone: true }),
     createdAt: now(),
     updatedAt: touched(),
   },

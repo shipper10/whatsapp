@@ -8,6 +8,20 @@
       "when": 1792818934461,
       "tag": "0000_sour_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792852396284,
+      "tag": "0001_library_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792852397285,
+      "tag": "0002_search_indexes",
+      "breakpoints": true
     }
   ]
 }
