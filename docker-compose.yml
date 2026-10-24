@@ -1,0 +1,49 @@
+# Runs on any Docker host (Oracle Cloud Always Free ARM/AMD VM, a cheap VPS, or your own machine).
+# Images are multi-arch (amd64 + arm64). OpenWA uses the Baileys engine: no Chromium, low RAM.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: bot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot"]
+      interval: 10s
+      retries: 5
+
+  openwa:
+    image: ghcr.io/rmyndharis/openwa:latest   # pin a version tag in production
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENGINE_TYPE: baileys
+      API_MASTER_KEY: ${OPENWA_API_KEY:?set OPENWA_API_KEY (>=32 chars) in .env}
+      CSP_UPGRADE_INSECURE_REQUESTS: "false"
+    volumes:
+      - openwa-data:/app/data
+    ports:
+      - "127.0.0.1:2785:2785"   # dashboard/QR via SSH tunnel; not exposed publicly
+
+  bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      openwa: { condition: service_started }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://bot:${POSTGRES_PASSWORD}@postgres:5432/bot
+      OPENWA_BASE_URL: http://openwa:2785
+    ports:
+      - "3000:3000"   # webhook receiver + /healthz (put a TLS proxy in front if public)
+    volumes:
+      - bot-tmp:/app/tmp
+
+volumes:
+  pgdata:
+  openwa-data:
+  bot-tmp:
