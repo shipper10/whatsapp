@@ -8,7 +8,7 @@ Goal: do not build from scratch. Reuse a maintained project for every layer; wri
 | Plan section | Decision | Reuse | Custom code still needed |
 |---|---|---|---|
 | WhatsApp transport (plan §3 #6, §8) | **Adopt OpenWA** as a self-hosted gateway (Docker). The bot talks to it over REST + signed webhooks. | [rmyndharis/OpenWA](https://github.com/rmyndharis/OpenWA), MIT, NestJS, engines: whatsapp-web.js or Baileys, Postgres/SQLite | Thin `WhatsAppProvider` adapter (webhook in, `send-text` / `send-document` out) |
-| Telegram ingestion (§4) | **GramJS** (MIT, Node, MTProto) with a dedicated login. | npm `telegram` | Cursor, idempotent upsert, edit detection, parser for index messages |
+| Telegram ingestion (§4) | **teleproto** (MIT, maintained fork of GramJS, same API; GramJS is archived) with a dedicated login. | npm `teleproto` | Cursor, idempotent upsert, edit detection, parser for index messages |
 | Drive indexing (§5) | **Official `googleapis`** Drive v3, metadata only (`files.list`, `fields=` whitelist). | npm `googleapis` | Source config, per-source credentials, recursive walk, cursors |
 | Database + ORM (§6) | **PostgreSQL + Drizzle ORM** (one ORM only). | drizzle-orm, drizzle-kit migrations | Schema from plan §6 |
 | Search (§10) | **Postgres FTS + `pg_trgm` + `unaccent`**. No extra search server. | built into Postgres | Arabic normalization (alef/ya/ta-marbuta/tashkeel), alias table |

@@ -5,7 +5,7 @@ Metadata-only library bot: Telegram channel + Google Drive folders -> searchable
 Design plan: `whatsapp_medical_library_bot_implementation_plan.md`. Reuse decisions: `docs/ALTERNATIVES_AND_DECISIONS.md`.
 
 ## Stack (all free / open source)
-OpenWA (WhatsApp gateway, Baileys engine) · GramJS (Telegram) · googleapis (Drive) · PostgreSQL + Drizzle · zod · pino · vitest.
+OpenWA (WhatsApp gateway, Baileys engine) · teleproto (Telegram, maintained fork of GramJS) · googleapis (Drive) · PostgreSQL + Drizzle · zod · pino · vitest.
 
 ## Layout
 ```
@@ -43,5 +43,5 @@ Back up the `pgdata` and `openwa-data` volumes (`pg_dump` + copy of openwa-data)
 
 ## Status
 Slice 1 done: scaffold, config, settings, schema, session-key rule, normalization, Docker.
-Slice 2 done: Telegram parser, idempotent resumable sync (GramJS source), login script (`npm run telegram:login`).
+Slice 2 done: Telegram parser, idempotent resumable sync (teleproto source), login script (`npm run telegram:login`).
 Next: wire sync into scheduler, Drive sync, classification/search, OpenWA adapter + conversation flow, delivery, admin commands.

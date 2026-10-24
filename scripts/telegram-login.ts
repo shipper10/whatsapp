@@ -4,9 +4,12 @@
  * Prints a session string. Put it in TELEGRAM_SESSION_STRING (.env / secret store). Never commit it.
  * Use a dedicated Telegram account that is a member of the channel.
  */
-import input from "input";
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions/index.js";
+import { createInterface } from "node:readline/promises";
+import { TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
+
+const rl = createInterface({ input: process.stdin, output: process.stdout });
+const ask = (q: string) => rl.question(q);
 
 const apiId = Number(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH ?? "";
@@ -14,11 +17,12 @@ if (!apiId || !apiHash) throw new Error("Set TELEGRAM_API_ID and TELEGRAM_API_HA
 
 const client = new TelegramClient(new StringSession(""), apiId, apiHash, { connectionRetries: 5 });
 await client.start({
-  phoneNumber: () => input.text("Phone number (+249...): "),
-  password: () => input.text("2FA password (if any): "),
-  phoneCode: () => input.text("Code sent by Telegram: "),
+  phoneNumber: () => ask("Phone number (+249...): "),
+  password: () => ask("2FA password (if any): "),
+  phoneCode: () => ask("Code sent by Telegram: "),
   onError: (e) => console.error(e),
 });
 console.log("\nTELEGRAM_SESSION_STRING=" + client.session.save());
 await client.disconnect();
+rl.close();
 process.exit(0);

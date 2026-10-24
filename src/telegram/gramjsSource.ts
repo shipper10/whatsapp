@@ -1,5 +1,5 @@
-import { Api, TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions/index.js";
+import { Api, TelegramClient } from "teleproto";
+import { StringSession } from "teleproto/sessions";
 import type { RawEntity, RawMedia, RawTelegramMessage, TelegramSource } from "./types.js";
 
 export interface GramJsConfig {
