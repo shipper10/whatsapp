@@ -1,0 +1,2022 @@
+{
+  "name": "Bahri Medicine B13 Library",
+  "type": "public_channel",
+  "id": 3448452098,
+  "messages": [
+    {
+      "id": 1,
+      "type": "service",
+      "date": "2025-11-25T10:03:24",
+      "date_unixtime": "1764057804",
+      "actor": "Bahri Medicine B13 Library",
+      "actor_id": "channel3448452098",
+      "action": "create_channel",
+      "title": "UOB FOM B13",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 2,
+      "type": "message",
+      "date": "2025-11-25T13:32:13",
+      "date_unixtime": "1764070333",
+      "edited": "2026-10-05T21:51:38",
+      "edited_unixtime": "1791229898",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "text": [
+        "🩺 ",
+        {
+          "type": "bold",
+          "text": "College of Medicine - Batch 13 Main Index"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "bold",
+          "text": "1️⃣ First Year · 5%"
+        },
+        "\n ├─ 🗓",
+        {
+          "type": "text_link",
+          "text": " 1st Semester",
+          "href": "https://t.me/BahriMed/3"
+        },
+        "\n └─ 🗓",
+        {
+          "type": "text_link",
+          "text": " 2nd Semester",
+          "href": "https://t.me/BahriMed/4"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "2️⃣ Second Year · 10%"
+        },
+        "\n └─ 🔜 Soon \n\n",
+        {
+          "type": "bold",
+          "text": "3️⃣ Third Year · 10%"
+        },
+        "\n └─ 🔜 Soon \n\n",
+        {
+          "type": "bold",
+          "text": "4️⃣ Fourth Year · 15%"
+        },
+        "\n └─ 🔜 Soon \n\n",
+        {
+          "type": "bold",
+          "text": "5️⃣ Fifth Year · 20%"
+        },
+        "\n └─ 🔜 Soon \n\n",
+        {
+          "type": "bold",
+          "text": "6️⃣ Sixth Year · 40%"
+        },
+        "\n └─ 🔜 Soon \n\n──────────────────\n\n🤖 ",
+        {
+          "type": "text_link",
+          "text": "Library Bot",
+          "href": "https://t.me/UOB_COM_B13_Library_bot"
+        },
+        "\n💬 ",
+        {
+          "type": "text_link",
+          "text": "Discussion Group",
+          "href": "https://t.me/+r7U9HzTPeH9jODQ0"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        ""
+      ],
+      "text_entities": [
+        {
+          "type": "plain",
+          "text": "🩺 "
+        },
+        {
+          "type": "bold",
+          "text": "College of Medicine - Batch 13 Main Index"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "1️⃣ First Year · 5%"
+        },
+        {
+          "type": "plain",
+          "text": "\n ├─ 🗓"
+        },
+        {
+          "type": "text_link",
+          "text": " 1st Semester",
+          "href": "https://t.me/BahriMed/3"
+        },
+        {
+          "type": "plain",
+          "text": "\n └─ 🗓"
+        },
+        {
+          "type": "text_link",
+          "text": " 2nd Semester",
+          "href": "https://t.me/BahriMed/4"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "2️⃣ Second Year · 10%"
+        },
+        {
+          "type": "plain",
+          "text": "\n └─ 🔜 Soon \n\n"
+        },
+        {
+          "type": "bold",
+          "text": "3️⃣ Third Year · 10%"
+        },
+        {
+          "type": "plain",
+          "text": "\n └─ 🔜 Soon \n\n"
+        },
+        {
+          "type": "bold",
+          "text": "4️⃣ Fourth Year · 15%"
+        },
+        {
+          "type": "plain",
+          "text": "\n └─ 🔜 Soon \n\n"
+        },
+        {
+          "type": "bold",
+          "text": "5️⃣ Fifth Year · 20%"
+        },
+        {
+          "type": "plain",
+          "text": "\n └─ 🔜 Soon \n\n"
+        },
+        {
+          "type": "bold",
+          "text": "6️⃣ Sixth Year · 40%"
+        },
+        {
+          "type": "plain",
+          "text": "\n └─ 🔜 Soon \n\n──────────────────\n\n🤖 "
+        },
+        {
+          "type": "text_link",
+          "text": "Library Bot",
+          "href": "https://t.me/UOB_COM_B13_Library_bot"
+        },
+        {
+          "type": "plain",
+          "text": "\n💬 "
+        },
+        {
+          "type": "text_link",
+          "text": "Discussion Group",
+          "href": "https://t.me/+r7U9HzTPeH9jODQ0"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        {
+          "type": "plain",
+          "text": ""
+        }
+      ],
+      "reactions": [
+        {
+          "type": "emoji",
+          "count": 6,
+          "emoji": "❤"
+        },
+        {
+          "type": "emoji",
+          "count": 3,
+          "emoji": "🔥"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "message",
+      "date": "2025-11-25T13:32:29",
+      "date_unixtime": "1764070349",
+      "edited": "2026-10-13T16:12:15",
+      "edited_unixtime": "1791900735",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "text": [
+        {
+          "type": "bold",
+          "text": "1️⃣ First Year\n🗓 1st Semester Index"
+        },
+        "\n\n──────────────────\n\n🧬 ",
+        {
+          "type": "text_link",
+          "text": "Cell Biology",
+          "href": "https://t.me/BahriMed/5"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        "\n🧪 ",
+        {
+          "type": "text_link",
+          "text": "Chemistry ",
+          "href": "https://t.me/BahriMed/6"
+        },
+        {
+          "type": "italic",
+          "text": "· 4 CH"
+        },
+        " \n🔤 ",
+        {
+          "type": "text_link",
+          "text": "English Language Skills",
+          "href": "https://t.me/BahriMed/7"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 4+4 CH"
+        },
+        "\n👥 ",
+        {
+          "type": "text_link",
+          "text": "Sociology & Psychology",
+          "href": "https://t.me/BahriMed/8"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        "\n🔢 ",
+        {
+          "type": "text_link",
+          "text": "Mathematics",
+          "href": "https://t.me/BahriMed/9"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        "\n⚛️ ",
+        {
+          "type": "text_link",
+          "text": "Medical Physics ",
+          "href": "https://t.me/BahriMed/10"
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        "\n🎓 ",
+        {
+          "type": "text_link",
+          "text": "University Study Skills",
+          "href": "https://t.me/BahriMed/11"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 2 CH\n"
+        },
+        "\n──────────────────\n\n☁️ ",
+        {
+          "type": "text_link",
+          "text": "Google Drive Folder",
+          "href": "https://drive.google.com/drive/folders/1_QdbGAL7W1fpcv18SCZGNwApFZL3jt0Q?usp=sharing"
+        },
+        "\n📦 Compressed Files:\n  ├─ 📔 ",
+        {
+          "type": "text_link",
+          "text": "Sheets Only",
+          "href": "https://t.me/BahriMed/290"
+        },
+        "\n  └─ 💯 ",
+        {
+          "type": "text_link",
+          "text": "All Content",
+          "href": "https://t.me/BahriMed/291"
+        },
+        "\n\n──────────────────\n\n↩️ ",
+        {
+          "type": "text_link",
+          "text": "Return to Main Index",
+          "href": "https://t.me/BahriMed/2"
+        },
+        " \n",
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#First_Year"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#First_Semester"
+        },
+        ""
+      ],
+      "text_entities": [
+        {
+          "type": "bold",
+          "text": "1️⃣ First Year\n🗓 1st Semester Index"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n🧬 "
+        },
+        {
+          "type": "text_link",
+          "text": "Cell Biology",
+          "href": "https://t.me/BahriMed/5"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n🧪 "
+        },
+        {
+          "type": "text_link",
+          "text": "Chemistry ",
+          "href": "https://t.me/BahriMed/6"
+        },
+        {
+          "type": "italic",
+          "text": "· 4 CH"
+        },
+        {
+          "type": "plain",
+          "text": " \n🔤 "
+        },
+        {
+          "type": "text_link",
+          "text": "English Language Skills",
+          "href": "https://t.me/BahriMed/7"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 4+4 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n👥 "
+        },
+        {
+          "type": "text_link",
+          "text": "Sociology & Psychology",
+          "href": "https://t.me/BahriMed/8"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n🔢 "
+        },
+        {
+          "type": "text_link",
+          "text": "Mathematics",
+          "href": "https://t.me/BahriMed/9"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n⚛️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Medical Physics ",
+          "href": "https://t.me/BahriMed/10"
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n🎓 "
+        },
+        {
+          "type": "text_link",
+          "text": "University Study Skills",
+          "href": "https://t.me/BahriMed/11"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH\n"
+        },
+        {
+          "type": "plain",
+          "text": "\n──────────────────\n\n☁️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Google Drive Folder",
+          "href": "https://drive.google.com/drive/folders/1_QdbGAL7W1fpcv18SCZGNwApFZL3jt0Q?usp=sharing"
+        },
+        {
+          "type": "plain",
+          "text": "\n📦 Compressed Files:\n  ├─ 📔 "
+        },
+        {
+          "type": "text_link",
+          "text": "Sheets Only",
+          "href": "https://t.me/BahriMed/290"
+        },
+        {
+          "type": "plain",
+          "text": "\n  └─ 💯 "
+        },
+        {
+          "type": "text_link",
+          "text": "All Content",
+          "href": "https://t.me/BahriMed/291"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n↩️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Return to Main Index",
+          "href": "https://t.me/BahriMed/2"
+        },
+        {
+          "type": "plain",
+          "text": " \n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#First_Year"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#First_Semester"
+        },
+        {
+          "type": "plain",
+          "text": ""
+        }
+      ],
+      "reactions": [
+        {
+          "type": "emoji",
+          "count": 21,
+          "emoji": "❤"
+        },
+        {
+          "type": "emoji",
+          "count": 1,
+          "emoji": "👍"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "message",
+      "date": "2025-11-25T13:32:40",
+      "date_unixtime": "1764070360",
+      "edited": "2026-10-05T11:00:56",
+      "edited_unixtime": "1791190856",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "text": [
+        {
+          "type": "bold",
+          "text": "1️⃣ First Year\n🗓 2nd Semester Index"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "text_link",
+          "text": "🧩 Biomolecules",
+          "href": "https://t.me/BahriMed/296"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 3 CH"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "👨‍👩‍👦‍👦 Community Health",
+          "href": "https://t.me/BahriMed/297"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "🔠 Medical Terminology",
+          "href": "https://t.me/BahriMed/298"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 3 CH"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "☯️ Homeostasis",
+          "href": "https://t.me/BahriMed/299"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 3 CH"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "👨 Human Biology",
+          "href": "https://t.me/BahriMed/300"
+        },
+        " ",
+        {
+          "type": "italic",
+          "text": "· 4 CH"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "🦴 Anatomy Practical",
+          "href": "https://t.me/BahriMed/301"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "🧫 Biochemistry Practical",
+          "href": "https://t.me/BahriMed/302"
+        },
+        "\n",
+        {
+          "type": "text_link",
+          "text": "⚙️ Physiology Practical",
+          "href": "https://t.me/BahriMed/303"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "text_link",
+          "text": "☁️ Google Drive Folder",
+          "href": "https://drive.google.com/drive/folders/1tPqLKupSDgijXkRVCvFSSa5oy2Od-WoS"
+        },
+        "\n📦 Compressed Files:\n  ├─ 📔 ",
+        {
+          "type": "text_link",
+          "text": "Sheets Only",
+          "href": "https://t.me/BahriMed/619"
+        },
+        "\n  └─ 💯 ",
+        {
+          "type": "text_link",
+          "text": "All Content",
+          "href": "https://t.me/BahriMed/620"
+        },
+        "\n\n──────────────────\n\n↩️ ",
+        {
+          "type": "text_link",
+          "text": "Return to Main Index",
+          "href": "https://t.me/BahriMed/2"
+        },
+        "\n",
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#First_Year"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Second_Semester"
+        },
+        ""
+      ],
+      "text_entities": [
+        {
+          "type": "bold",
+          "text": "1️⃣ First Year\n🗓 2nd Semester Index"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "text_link",
+          "text": "🧩 Biomolecules",
+          "href": "https://t.me/BahriMed/296"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 3 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "👨‍👩‍👦‍👦 Community Health",
+          "href": "https://t.me/BahriMed/297"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 2 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "🔠 Medical Terminology",
+          "href": "https://t.me/BahriMed/298"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 3 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "☯️ Homeostasis",
+          "href": "https://t.me/BahriMed/299"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 3 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "👨 Human Biology",
+          "href": "https://t.me/BahriMed/300"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "italic",
+          "text": "· 4 CH"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "🦴 Anatomy Practical",
+          "href": "https://t.me/BahriMed/301"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "🧫 Biochemistry Practical",
+          "href": "https://t.me/BahriMed/302"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "text_link",
+          "text": "⚙️ Physiology Practical",
+          "href": "https://t.me/BahriMed/303"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "text_link",
+          "text": "☁️ Google Drive Folder",
+          "href": "https://drive.google.com/drive/folders/1tPqLKupSDgijXkRVCvFSSa5oy2Od-WoS"
+        },
+        {
+          "type": "plain",
+          "text": "\n📦 Compressed Files:\n  ├─ 📔 "
+        },
+        {
+          "type": "text_link",
+          "text": "Sheets Only",
+          "href": "https://t.me/BahriMed/619"
+        },
+        {
+          "type": "plain",
+          "text": "\n  └─ 💯 "
+        },
+        {
+          "type": "text_link",
+          "text": "All Content",
+          "href": "https://t.me/BahriMed/620"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n↩️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Return to Main Index",
+          "href": "https://t.me/BahriMed/2"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#First_Year"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Second_Semester"
+        },
+        {
+          "type": "plain",
+          "text": ""
+        }
+      ],
+      "reactions": [
+        {
+          "type": "emoji",
+          "count": 12,
+          "emoji": "❤"
+        },
+        {
+          "type": "emoji",
+          "count": 7,
+          "emoji": "🔥"
+        },
+        {
+          "type": "emoji",
+          "count": 3,
+          "emoji": "👍"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "message",
+      "date": "2025-11-25T13:33:30",
+      "date_unixtime": "1764070410",
+      "edited": "2026-10-13T17:00:20",
+      "edited_unixtime": "1791903620",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "text": [
+        "🧪 ",
+        {
+          "type": "bold",
+          "text": "Chemistry Index\n"
+        },
+        "\n──────────────────\n\n",
+        {
+          "type": "bold",
+          "text": "📔 Sheets:"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "*Dr. Ahmed"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "Basic Chemistry",
+          "href": "https://t.me/BahriMed/46"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Phases of Matter & solutions",
+          "href": "https://t.me/BahriMed/87"
+        },
+        "\n3 - ",
+        {
+          "type": "text_link",
+          "text": "Nomenclature",
+          "href": "https://t.me/BahriMed/100"
+        },
+        "\n4 - ",
+        {
+          "type": "text_link",
+          "text": "Chemical Reactions",
+          "href": "https://t.me/BahriMed/115"
+        },
+        "\n5 - ",
+        {
+          "type": "text_link",
+          "text": "Elements, Atoms & Ions",
+          "href": "https://t.me/BahriMed/136"
+        },
+        "\n6 - ",
+        {
+          "type": "text_link",
+          "text": "Chemical Bonding",
+          "href": "https://t.me/BahriMed/144"
+        },
+        "\n7 - ",
+        {
+          "type": "text_link",
+          "text": "Chemical Composition",
+          "href": "https://t.me/BahriMed/160"
+        },
+        "\n8 - ",
+        {
+          "type": "text_link",
+          "text": "Gases",
+          "href": "https://t.me/BahriMed/161"
+        },
+        "\n9 - ",
+        {
+          "type": "text_link",
+          "text": "Thermochemistry & Thermodynamics",
+          "href": "https://t.me/BahriMed/181"
+        },
+        "\n10 - ",
+        {
+          "type": "text_link",
+          "text": "Solids",
+          "href": "https://t.me/BahriMed/242"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "*Dr. Osman"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "Acids & Bases",
+          "href": "https://t.me/BahriMed/43"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Indicator & pH Curves",
+          "href": "https://t.me/BahriMed/95"
+        },
+        "\n3 - ",
+        {
+          "type": "text_link",
+          "text": "Fundamentals of Organic Chemistry",
+          "href": "https://t.me/BahriMed/101"
+        },
+        "\n4 - ",
+        {
+          "type": "text_link",
+          "text": "Aromatic Compounds",
+          "href": "https://t.me/BahriMed/137"
+        },
+        "\n5 - ",
+        {
+          "type": "text_link",
+          "text": "Aqueous Solutions",
+          "href": "https://t.me/BahriMed/167"
+        },
+        "\n6 - ",
+        {
+          "type": "text_link",
+          "text": "Aromaticity Heterocyclic",
+          "href": "https://t.me/BahriMed/256"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "bold",
+          "text": "🎙 Lectures:"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "*Dr. Ahmed"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "Basic Chemistry",
+          "href": "https://t.me/BahriMed/47"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Solids Crystal Lattices",
+          "href": "https://t.me/BahriMed/210"
+        },
+        "\n3 - ",
+        {
+          "type": "text_link",
+          "text": "Chemical Reactions",
+          "href": "https://t.me/BahriMed/231"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "*Dr. Osman"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "Contents & Acids and Bases Theories",
+          "href": "https://t.me/BahriMed/42"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Lewis theory & Self-ionization of water",
+          "href": "https://t.me/BahriMed/62"
+        },
+        "\n3 - ",
+        {
+          "type": "text_link",
+          "text": "Acid – Base Strength & Polyprotic Acids",
+          "href": "https://t.me/BahriMed/89"
+        },
+        "\n4 - ",
+        {
+          "type": "text_link",
+          "text": "Indicator & pH Curves",
+          "href": "https://t.me/BahriMed/96"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "bold",
+          "text": "⚗️ Lab"
+        },
+        "\n1 -",
+        {
+          "type": "text_link",
+          "text": " Titrations",
+          "href": "https://t.me/BahriMed/71"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Organic",
+          "href": "https://t.me/BahriMed/208"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "bold",
+          "text": "📝 Exams:"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "Exams",
+          "href": "https://t.me/BahriMed/132"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Dr. Ahmed MidTerm",
+          "href": "https://t.me/BahriMed/146"
+        },
+        "\n3 - ",
+        {
+          "type": "text_link",
+          "text": "Test2",
+          "href": "https://t.me/BahriMed/239"
+        },
+        "\n4 - ",
+        {
+          "type": "text_link",
+          "text": "Batch 24 MidTerm",
+          "href": "https://t.me/BahriMed/266"
+        },
+        "\n5 - ",
+        {
+          "type": "text_link",
+          "text": "Dr. Ahmed Sheets Tests",
+          "href": "https://t.me/BahriMed/267"
+        },
+        "\n6 - ",
+        {
+          "type": "text_link",
+          "text": "Dr. Osman Sheets Tests ",
+          "href": "https://t.me/BahriMed/268"
+        },
+        "\n\n──────────────────\n\n",
+        {
+          "type": "bold",
+          "text": "🔖 Notes:"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "📔 Sheets:"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "pH, pk, ka, ...etc",
+          "href": "https://t.me/BahriMed/126"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Acids & Bases, pH, pK, etc",
+          "href": "https://t.me/BahriMed/141"
+        },
+        "\n3 - ",
+        {
+          "type": "text_link",
+          "text": "Equilibrium",
+          "href": "https://t.me/BahriMed/227"
+        },
+        "\n4 - ",
+        {
+          "type": "text_link",
+          "text": "Solids",
+          "href": "https://t.me/BahriMed/244"
+        },
+        "\n5 - ",
+        {
+          "type": "text_link",
+          "text": "Basic Chemistry Summary",
+          "href": "https://t.me/BahriMed/265"
+        },
+        "\n6 - ",
+        {
+          "type": "text_link",
+          "text": "Summary & Laws",
+          "href": "https://t.me/BahriMed/273"
+        },
+        "\n\n",
+        {
+          "type": "bold",
+          "text": "🎙 Audios:"
+        },
+        "\n1 - ",
+        {
+          "type": "text_link",
+          "text": "pH, pk, ka, ...etc",
+          "href": "https://t.me/BahriMed/234"
+        },
+        "\n2 - ",
+        {
+          "type": "text_link",
+          "text": "Solids",
+          "href": "https://t.me/BahriMed/245"
+        },
+        " \n\n──────────────────\n\n",
+        {
+          "type": "text_link",
+          "text": "↩️ ",
+          "href": "https://t.me/c/3448452098/2"
+        },
+        {
+          "type": "text_link",
+          "text": "Return to 1st Year - 1st Semeter Index",
+          "href": "https://t.me/BahriMed/3"
+        },
+        "\n",
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Chemistry"
+        },
+        ""
+      ],
+      "text_entities": [
+        {
+          "type": "plain",
+          "text": "🧪 "
+        },
+        {
+          "type": "bold",
+          "text": "Chemistry Index\n"
+        },
+        {
+          "type": "plain",
+          "text": "\n──────────────────\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "📔 Sheets:"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "*Dr. Ahmed"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Basic Chemistry",
+          "href": "https://t.me/BahriMed/46"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Phases of Matter & solutions",
+          "href": "https://t.me/BahriMed/87"
+        },
+        {
+          "type": "plain",
+          "text": "\n3 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Nomenclature",
+          "href": "https://t.me/BahriMed/100"
+        },
+        {
+          "type": "plain",
+          "text": "\n4 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Chemical Reactions",
+          "href": "https://t.me/BahriMed/115"
+        },
+        {
+          "type": "plain",
+          "text": "\n5 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Elements, Atoms & Ions",
+          "href": "https://t.me/BahriMed/136"
+        },
+        {
+          "type": "plain",
+          "text": "\n6 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Chemical Bonding",
+          "href": "https://t.me/BahriMed/144"
+        },
+        {
+          "type": "plain",
+          "text": "\n7 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Chemical Composition",
+          "href": "https://t.me/BahriMed/160"
+        },
+        {
+          "type": "plain",
+          "text": "\n8 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Gases",
+          "href": "https://t.me/BahriMed/161"
+        },
+        {
+          "type": "plain",
+          "text": "\n9 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Thermochemistry & Thermodynamics",
+          "href": "https://t.me/BahriMed/181"
+        },
+        {
+          "type": "plain",
+          "text": "\n10 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Solids",
+          "href": "https://t.me/BahriMed/242"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "*Dr. Osman"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Acids & Bases",
+          "href": "https://t.me/BahriMed/43"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Indicator & pH Curves",
+          "href": "https://t.me/BahriMed/95"
+        },
+        {
+          "type": "plain",
+          "text": "\n3 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Fundamentals of Organic Chemistry",
+          "href": "https://t.me/BahriMed/101"
+        },
+        {
+          "type": "plain",
+          "text": "\n4 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Aromatic Compounds",
+          "href": "https://t.me/BahriMed/137"
+        },
+        {
+          "type": "plain",
+          "text": "\n5 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Aqueous Solutions",
+          "href": "https://t.me/BahriMed/167"
+        },
+        {
+          "type": "plain",
+          "text": "\n6 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Aromaticity Heterocyclic",
+          "href": "https://t.me/BahriMed/256"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "🎙 Lectures:"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "*Dr. Ahmed"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Basic Chemistry",
+          "href": "https://t.me/BahriMed/47"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Solids Crystal Lattices",
+          "href": "https://t.me/BahriMed/210"
+        },
+        {
+          "type": "plain",
+          "text": "\n3 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Chemical Reactions",
+          "href": "https://t.me/BahriMed/231"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "*Dr. Osman"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Contents & Acids and Bases Theories",
+          "href": "https://t.me/BahriMed/42"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Lewis theory & Self-ionization of water",
+          "href": "https://t.me/BahriMed/62"
+        },
+        {
+          "type": "plain",
+          "text": "\n3 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Acid – Base Strength & Polyprotic Acids",
+          "href": "https://t.me/BahriMed/89"
+        },
+        {
+          "type": "plain",
+          "text": "\n4 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Indicator & pH Curves",
+          "href": "https://t.me/BahriMed/96"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "⚗️ Lab"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 -"
+        },
+        {
+          "type": "text_link",
+          "text": " Titrations",
+          "href": "https://t.me/BahriMed/71"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Organic",
+          "href": "https://t.me/BahriMed/208"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "📝 Exams:"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Exams",
+          "href": "https://t.me/BahriMed/132"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Dr. Ahmed MidTerm",
+          "href": "https://t.me/BahriMed/146"
+        },
+        {
+          "type": "plain",
+          "text": "\n3 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Test2",
+          "href": "https://t.me/BahriMed/239"
+        },
+        {
+          "type": "plain",
+          "text": "\n4 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Batch 24 MidTerm",
+          "href": "https://t.me/BahriMed/266"
+        },
+        {
+          "type": "plain",
+          "text": "\n5 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Dr. Ahmed Sheets Tests",
+          "href": "https://t.me/BahriMed/267"
+        },
+        {
+          "type": "plain",
+          "text": "\n6 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Dr. Osman Sheets Tests ",
+          "href": "https://t.me/BahriMed/268"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n──────────────────\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "🔖 Notes:"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "📔 Sheets:"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "pH, pk, ka, ...etc",
+          "href": "https://t.me/BahriMed/126"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Acids & Bases, pH, pK, etc",
+          "href": "https://t.me/BahriMed/141"
+        },
+        {
+          "type": "plain",
+          "text": "\n3 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Equilibrium",
+          "href": "https://t.me/BahriMed/227"
+        },
+        {
+          "type": "plain",
+          "text": "\n4 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Solids",
+          "href": "https://t.me/BahriMed/244"
+        },
+        {
+          "type": "plain",
+          "text": "\n5 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Basic Chemistry Summary",
+          "href": "https://t.me/BahriMed/265"
+        },
+        {
+          "type": "plain",
+          "text": "\n6 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Summary & Laws",
+          "href": "https://t.me/BahriMed/273"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n"
+        },
+        {
+          "type": "bold",
+          "text": "🎙 Audios:"
+        },
+        {
+          "type": "plain",
+          "text": "\n1 - "
+        },
+        {
+          "type": "text_link",
+          "text": "pH, pk, ka, ...etc",
+          "href": "https://t.me/BahriMed/234"
+        },
+        {
+          "type": "plain",
+          "text": "\n2 - "
+        },
+        {
+          "type": "text_link",
+          "text": "Solids",
+          "href": "https://t.me/BahriMed/245"
+        },
+        {
+          "type": "plain",
+          "text": " \n\n──────────────────\n\n"
+        },
+        {
+          "type": "text_link",
+          "text": "↩️ ",
+          "href": "https://t.me/c/3448452098/2"
+        },
+        {
+          "type": "text_link",
+          "text": "Return to 1st Year - 1st Semeter Index",
+          "href": "https://t.me/BahriMed/3"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#Index"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Chemistry"
+        },
+        {
+          "type": "plain",
+          "text": ""
+        }
+      ],
+      "reactions": [
+        {
+          "type": "emoji",
+          "count": 13,
+          "emoji": "❤"
+        },
+        {
+          "type": "emoji",
+          "count": 1,
+          "emoji": "👏"
+        }
+      ]
+    },
+    {
+      "id": 59,
+      "type": "message",
+      "date": "2025-12-07T22:29:56",
+      "date_unixtime": "1765139396",
+      "edited": "2026-10-13T17:33:08",
+      "edited_unixtime": "1791905588",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "file": "(File not included. Change data exporting settings to download.)",
+      "file_name": "11 - مهارات التفوق الدراسي.pdf",
+      "file_size": 5990373,
+      "mime_type": "application/pdf",
+      "text": [
+        "📔 powerpoint of Unit 11\n\n11 - مهارات التفوق الدراسي\n\n↩️ ",
+        {
+          "type": "text_link",
+          "text": "Return to University Study Skills Index",
+          "href": "https://t.me/BahriMed/11"
+        },
+        "\n",
+        {
+          "type": "hashtag",
+          "text": "#University_Study_Skills"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Sheet"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Book"
+        },
+        " 🎓"
+      ],
+      "text_entities": [
+        {
+          "type": "plain",
+          "text": "📔 powerpoint of Unit 11\n\n11 - مهارات التفوق الدراسي\n\n↩️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Return to University Study Skills Index",
+          "href": "https://t.me/BahriMed/11"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#University_Study_Skills"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Sheet"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Book"
+        },
+        {
+          "type": "plain",
+          "text": " 🎓"
+        }
+      ]
+    },
+    {
+      "id": 160,
+      "type": "message",
+      "date": "2026-01-27T00:51:46",
+      "date_unixtime": "1769467906",
+      "edited": "2026-10-13T17:55:44",
+      "edited_unixtime": "1791906944",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "author": "محمد احمد",
+      "file": "(File not included. Change data exporting settings to download.)",
+      "file_name": "Chemistry Dr. Ahmed Sheet 7 - Chemical Composition.pdf",
+      "file_size": 361401,
+      "mime_type": "application/pdf",
+      "text": [
+        "📔 Chemistry Dr. Ahmed Sheet 7 - Chemical Composition\n\n↩️ ",
+        {
+          "type": "text_link",
+          "text": "Return to Chemistry Index",
+          "href": "https://t.me/BahriMed/6"
+        },
+        "\n",
+        {
+          "type": "hashtag",
+          "text": "#Chemistry"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Sheet"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Book"
+        },
+        " 🧪"
+      ],
+      "text_entities": [
+        {
+          "type": "plain",
+          "text": "📔 Chemistry Dr. Ahmed Sheet 7 - Chemical Composition\n\n↩️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Return to Chemistry Index",
+          "href": "https://t.me/BahriMed/6"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#Chemistry"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Sheet"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Book"
+        },
+        {
+          "type": "plain",
+          "text": " 🧪"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "message",
+      "date": "2025-11-25T13:33:30",
+      "date_unixtime": "1764070410",
+      "edited": "2026-10-13T17:24:27",
+      "edited_unixtime": "1791905067",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "file": "(File not included. Change data exporting settings to download.)",
+      "file_name": "University Study Skills L00.m4a",
+      "file_size": 37690591,
+      "media_type": "audio_file",
+      "performer": "Dr. Wiam Siralkhatim Ahmed",
+      "title": "University Study Skills Lecture 00",
+      "mime_type": "audio/m4a",
+      "duration_seconds": 2318,
+      "text": [
+        "🎙 University Study Skills Lecture 00\n\n- Subject Overview and Content\n\n↩️ ",
+        {
+          "type": "text_link",
+          "text": "Return to University Study Skills Index",
+          "href": "https://t.me/BahriMed/11"
+        },
+        "\n",
+        {
+          "type": "hashtag",
+          "text": "#University_Study_Skills"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Lecture"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Audio"
+        },
+        " 🎓"
+      ],
+      "text_entities": [
+        {
+          "type": "plain",
+          "text": "🎙 University Study Skills Lecture 00\n\n- Subject Overview and Content\n\n↩️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Return to University Study Skills Index",
+          "href": "https://t.me/BahriMed/11"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#University_Study_Skills"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Lecture"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Audio"
+        },
+        {
+          "type": "plain",
+          "text": " 🎓"
+        }
+      ]
+    },
+    {
+      "id": 195,
+      "type": "message",
+      "date": "2026-02-13T15:32:23",
+      "date_unixtime": "1770989543",
+      "edited": "2026-10-13T18:03:17",
+      "edited_unixtime": "1791907397",
+      "from": "Bahri Medicine B13 Library",
+      "from_id": "channel3448452098",
+      "author": "محمد احمد",
+      "file": "(File not included. Change data exporting settings to download.)",
+      "file_name": "Medical Physics LAB - Hook 1.mp4",
+      "file_size": 24204745,
+      "thumbnail": "(File not included. Change data exporting settings to download.)",
+      "thumbnail_file_size": 11488,
+      "media_type": "video_file",
+      "mime_type": "video/mp4",
+      "duration_seconds": 229,
+      "width": 360,
+      "height": 640,
+      "text": [
+        "🔭 ",
+        {
+          "type": "bold",
+          "text": "Medical Physics LAB Video 🎥\n\nHook 1"
+        },
+        "\n\n↩️ ",
+        {
+          "type": "text_link",
+          "text": "Return to Medical Physics Index",
+          "href": "https://t.me/BahriMed/10"
+        },
+        "\n",
+        {
+          "type": "hashtag",
+          "text": "#Medical_Physics"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Lab"
+        },
+        " ",
+        {
+          "type": "hashtag",
+          "text": "#Video"
+        },
+        " ⚛️"
+      ],
+      "text_entities": [
+        {
+          "type": "plain",
+          "text": "🔭 "
+        },
+        {
+          "type": "bold",
+          "text": "Medical Physics LAB Video 🎥\n\nHook 1"
+        },
+        {
+          "type": "plain",
+          "text": "\n\n↩️ "
+        },
+        {
+          "type": "text_link",
+          "text": "Return to Medical Physics Index",
+          "href": "https://t.me/BahriMed/10"
+        },
+        {
+          "type": "plain",
+          "text": "\n"
+        },
+        {
+          "type": "hashtag",
+          "text": "#Medical_Physics"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Lab"
+        },
+        {
+          "type": "plain",
+          "text": " "
+        },
+        {
+          "type": "hashtag",
+          "text": "#Video"
+        },
+        {
+          "type": "plain",
+          "text": " ⚛️"
+        }
+      ]
+    }
+  ]
+}
