@@ -15,12 +15,15 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "telegram:login": "tsx scripts/telegram-login.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
+    "input": "^1.0.1",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
+    "telegram": "^2.26.22",
     "zod": "^4.6.7"
   },
   "devDependencies": {

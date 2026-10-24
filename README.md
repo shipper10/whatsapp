@@ -43,4 +43,5 @@ Back up the `pgdata` and `openwa-data` volumes (`pg_dump` + copy of openwa-data)
 
 ## Status
 Slice 1 done: scaffold, config, settings, schema, session-key rule, normalization, Docker.
-Next: Telegram sync, Drive sync, classification/search, OpenWA adapter + conversation flow, delivery, admin commands.
+Slice 2 done: Telegram parser, idempotent resumable sync (GramJS source), login script (`npm run telegram:login`).
+Next: wire sync into scheduler, Drive sync, classification/search, OpenWA adapter + conversation flow, delivery, admin commands.
