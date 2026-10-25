@@ -8,3 +8,4 @@ telegram-session*
 data/
 tmp/
 backups/
+tmp-e2e/

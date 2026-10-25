@@ -74,6 +74,13 @@ export const settingsRegistry = {
     restart: false,
     description: "Drive metadata sync interval.",
   }),
+  "sync.telegram.rescanWindow": def({
+    schema: z.coerce.number().int().min(0).max(5000),
+    default: 200,
+    restart: false,
+    description:
+      "How many recent Telegram message ids are re-read each sync to catch edits (0 = off).",
+  }),
   "sync.concurrency": def({
     schema: z.coerce.number().int().min(1).max(10),
     default: 3,
@@ -100,6 +107,20 @@ export const settingsRegistry = {
     default: [],
     restart: false,
     description: "Allowed MIME prefixes/types for attachments. Empty = allow all.",
+  }),
+  "delivery.timeoutSeconds": def({
+    schema: z.coerce.number().int().min(1).max(900),
+    default: 120,
+    envName: "DELIVERY_TIMEOUT_SECONDS",
+    restart: false,
+    description: "Max time to download + send one file before falling back to links.",
+  }),
+  "delivery.driveDownload": def({
+    schema: z.boolean(),
+    default: false,
+    restart: false,
+    description:
+      "Allow fetching a file from Drive for attachment delivery (needs the broader drive.readonly scope).",
   }),
   "delivery.sendAttachment": def({
     schema: z.boolean(),

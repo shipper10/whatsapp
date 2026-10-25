@@ -10,10 +10,22 @@ const LABEL = { telegram: "Telegram", google_drive: "Google Drive" } as const;
 export function formatLinksMessage(
   d: ResourceDetail,
   lang: "ar" | "en",
-  attachment: "sent" | "failed" | "not_attempted",
+  attachment: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked",
 ): string {
   const lines = [`*${d.displayName}*`];
   if (attachment === "sent") lines.push(lang === "ar" ? "📎 تم إرسال الملف." : "📎 File sent.");
+  else if (attachment === "too_large")
+    lines.push(
+      lang === "ar"
+        ? "📎 الملف كبير لإرساله هنا. افتحه من الروابط:"
+        : "📎 The file is too large to send here. Open it here:",
+    );
+  else if (attachment === "type_blocked")
+    lines.push(
+      lang === "ar"
+        ? "📎 هذا النوع من الملفات لا يُرسل هنا. افتحه من الروابط:"
+        : "📎 This file type isn't sent here. Open it here:",
+    );
   else if (attachment === "failed")
     lines.push(
       lang === "ar"

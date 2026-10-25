@@ -64,3 +64,21 @@ export class Deduper {
     return false;
   }
 }
+
+/** Bounded parallelism (FIFO). */
+export class Semaphore {
+  private active = 0;
+  private waiters: (() => void)[] = [];
+  constructor(private readonly limit: number) {}
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) await new Promise<void>((r) => this.waiters.push(r));
+    this.active++;
+    try {
+      return await fn();
+    } finally {
+      this.active--;
+      this.waiters.shift()?.();
+    }
+  }
+}

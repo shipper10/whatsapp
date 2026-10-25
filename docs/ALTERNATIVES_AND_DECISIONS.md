@@ -12,7 +12,7 @@ Goal: do not build from scratch. Reuse a maintained project for every layer; wri
 | Drive indexing (§5) | **Official `googleapis`** Drive v3, metadata only (`files.list`, `fields=` whitelist). | npm `googleapis` | Source config, per-source credentials, recursive walk, cursors |
 | Database + ORM (§6) | **PostgreSQL + Drizzle ORM** (one ORM only). | drizzle-orm, drizzle-kit migrations | Schema from plan §6 |
 | Search (§10) | **Postgres FTS + `pg_trgm` + `unaccent`**. No extra search server. | built into Postgres | Arabic normalization (alef/ya/ta-marbuta/tashkeel), alias table |
-| Queue / scheduler (§9, §13) | **pg-boss** (Postgres-backed queue, cron, retry, concurrency). No Redis. | npm `pg-boss` | Job handlers |
+| Queue / scheduler (§9, §13) | **In-process loops + Semaphore/KeyedMutex** (single-process deployment; intervals re-read from settings each cycle). pg-boss was considered and deferred: it adds nothing while there is one process. | none | `src/jobs/scheduler.ts` |
 | Sessions (§8) | Plain Postgres table `user_sessions`, unique `(provider, conversation_id, participant_id)`. | none needed | Menu state machine |
 | Config validation (§11) | **zod** schema over env + DB-backed runtime settings table. | zod | Settings layer |
 | Admin (§12) | WhatsApp admin commands (allowlisted ids) + OpenWA dashboard for session/QR. No custom web UI in v1. | OpenWA dashboard | Admin command handlers |

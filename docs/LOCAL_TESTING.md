@@ -18,3 +18,9 @@ Requires Node 22+. Postgres is only needed for step 4.
    A folder that is not shared prints `FAIL ... Share the folder (Viewer) with <email>`.
 5. Different service accounts per source: put another key path in a new env var and add the source with `env:THAT_VAR` as credential_ref.
 The bot only requests the read-only metadata scope, so it cannot change files or read their content.
+
+## Attachments
+- Telegram files are downloaded temporarily with the same Telegram login used for sync, sent through OpenWA, then deleted.
+- Drive files are only downloaded if an admin sets `delivery.driveDownload=true` (needs the broader read-only scope for the service account; indexing alone stays metadata-only).
+- Limits (all runtime settings): `delivery.maxAttachmentMb`, `delivery.allowedMediaTypes`, `delivery.timeoutSeconds`, `delivery.sendAttachment`.
+- Whatever happens, the reply always contains the real Telegram/Drive links.
