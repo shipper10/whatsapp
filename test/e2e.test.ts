@@ -66,6 +66,7 @@ beforeAll(async () => {
       OPENWA_WEBHOOK_SECRET: SECRET,
       PORT: String(appPort),
       ENABLE_SCHEDULER: "false",
+      ADMIN_IDS: "249900000009@c.us",
       TEMP_FILE_DIR: "./tmp-e2e",
       LOG_LEVEL: "warn",
     },
@@ -119,6 +120,17 @@ async function say(text: string, who = "249911111111@c.us", group?: string) {
   await new Promise((r) => setTimeout(r, 100));
   return sent.slice(before);
 }
+
+describe("admin over the running app", () => {
+  it("admin gets command output in private chat; the same text from a stranger is just a search", async () => {
+    const a = await say("/help", "249900000009@c.us");
+    expect(a[0]?.body.text).toContain("Admin commands");
+    const st = await say("/stats", "249900000009@c.us");
+    expect(st[0]?.body.text).toContain("Resources:");
+    const s = await say("/stats", "249988888888@c.us");
+    expect(s[0]?.body.text).not.toContain("Resources:");
+  });
+});
 
 describe("full application over HTTP with real Postgres and a fake OpenWA", () => {
   it("rejects unsigned requests", async () => {

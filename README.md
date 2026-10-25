@@ -48,4 +48,5 @@ Slice 3 done: Drive metadata sync (service account, recursive, per-source isolat
 Slice 4 done: metadata-only classification (index tree -> semester/subject/topic, category tags, Drive matching), apply, search (FTS + aliases + trigram), browse. Tested on real Postgres (PGlite) with the full channel structure.
 Slice 5 done: OpenWA adapter (signed webhook in, send-text out), per-participant persistent sessions, conversation engine (browse, search, paging, back/home), group triggers and policies, rate limit, dedupe. Setup: `docs/WHATSAPP_SETUP.md`.
 Slice 6 done: file delivery (Telegram download, optional Drive download, size/type limits, timeout, temp cleanup, links always included, link fallback), sync scheduler (runtime-editable intervals, no overlap, stale detection), end-to-end test of the running app.
-Next: admin commands (sync now, settings, sources, reports, review queue), backups + restore doc, deployment guide.
+Slice 7 done: admin commands over WhatsApp (status, stats, sync now, settings, Drive sources, review/assign, aliases, admins, audit), daily backups + restore drill, operations guide (`docs/OPERATIONS.md`).
+Next: real-account verification (Telegram login, Drive share, WhatsApp link), then polish from live feedback.

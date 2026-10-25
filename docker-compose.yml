@@ -45,6 +45,20 @@ services:
     volumes:
       - bot-tmp:/app/tmp
 
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://bot:${POSTGRES_PASSWORD}@postgres:5432/bot
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./backups:/backups
+      - openwa-data:/openwa-data:ro
+    entrypoint: ["sh", "-c", "while true; do /scripts/backup.sh || echo 'BACKUP FAILED'; sleep ${BACKUP_INTERVAL_HOURS:-24}h; done"]
+
 volumes:
   pgdata:
   openwa-data:

@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { createAdminHook } from "./admin/commands.js";
 import { createHandler } from "./bot/handler.js";
 import { loadEnv } from "./config/env.js";
 import { DbSessionStore } from "./core/session/store.js";
@@ -84,8 +85,6 @@ const deliverer = new FileDeliverer({
   logger: log,
 });
 
-const handler = createHandler({ provider, settings, sessions, library, deliverer, logger: log });
-
 // --- Sync scheduler
 const channelUsername = async () => {
   if (env.TELEGRAM_CHANNEL && !/^-?\d+$/.test(env.TELEGRAM_CHANNEL)) return env.TELEGRAM_CHANNEL;
@@ -111,6 +110,25 @@ const scheduler = new SyncScheduler({
     drive: async () => syncDrive(new DbDriveStore(db), (s) => driveClientFor(s.credentialRef)),
   },
   classify: async () => classifyAndApply(db, await channelUsername()),
+});
+
+const adminHook = createAdminHook({
+  db,
+  settings,
+  scheduler,
+  bootstrapAdmins: env.ADMIN_IDS,
+  send: async (msg, text) => {
+    await provider.sendText({ conversationId: msg.conversationId, text });
+  },
+});
+const handler = createHandler({
+  provider,
+  settings,
+  sessions,
+  library,
+  deliverer,
+  logger: log,
+  adminHook,
 });
 
 const server = createAppServer({
