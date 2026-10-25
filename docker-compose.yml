@@ -23,6 +23,8 @@ services:
       ENGINE_TYPE: baileys
       API_MASTER_KEY: ${OPENWA_API_KEY:?set OPENWA_API_KEY (>=32 chars) in .env}
       CSP_UPGRADE_INSECURE_REQUESTS: "false"
+      SSRF_ALLOWED_HOSTS: bot   # let OpenWA deliver webhooks to the bot container on the compose network
+      RESOLVE_LID_TO_PHONE: "true"   # best-effort phone for privacy-id (@lid) senders in groups
     volumes:
       - openwa-data:/app/data
     ports:

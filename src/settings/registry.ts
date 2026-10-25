@@ -120,6 +120,27 @@ export const settingsRegistry = {
     restart: false,
     description: "Max messages handled per participant per minute.",
   }),
+  "bot.language": def({
+    schema: z.enum(["ar", "en"]),
+    default: "ar",
+    envName: "BOT_LANGUAGE",
+    restart: false,
+    description: "Language of bot messages.",
+  }),
+  "bot.maxMessageAgeSeconds": def({
+    schema: z.coerce.number().int().min(0),
+    default: 300,
+    restart: false,
+    description:
+      "Ignore inbound messages older than this (avoids replay after downtime). 0 = no limit.",
+  }),
+  "group.triggers": def({
+    schema: z.array(z.string().min(1)),
+    default: ["مكتبة", "المكتبة", "library", "lib"],
+    restart: false,
+    description:
+      "Words that start an interaction in a group. Active sessions continue without them.",
+  }),
   "text.welcome": def({
     schema: z.string(),
     default: "أهلاً بك في المكتبة الطبية 📚\nWelcome to the medical library.",

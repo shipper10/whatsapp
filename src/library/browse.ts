@@ -140,3 +140,20 @@ export async function resourceDetail(db: Db, id: number): Promise<ResourceDetail
   }
   return { id: res.id, displayName: res.displayName, path, sources };
 }
+
+export interface NodeInfo extends NodeItem {
+  path: string[];
+}
+
+export async function nodeInfo(db: Db, id: number): Promise<NodeInfo | null> {
+  const path: string[] = [];
+  let first: NodeItem | null = null;
+  for (let nid: number | null = id; nid; ) {
+    const [n] = await db.select().from(academicNodes).where(eq(academicNodes.id, nid));
+    if (!n) break;
+    if (!first) first = { id: n.id, type: n.nodeType, name: n.name, parentId: n.parentId };
+    path.unshift(n.name);
+    nid = n.parentId;
+  }
+  return first ? { ...first, path } : null;
+}

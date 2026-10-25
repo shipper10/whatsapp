@@ -46,4 +46,5 @@ Slice 1 done: scaffold, config, settings, schema, session-key rule, normalizatio
 Slice 2 done: Telegram parser, idempotent resumable sync (teleproto source), login script (`npm run telegram:login`).
 Slice 3 done: Drive metadata sync (service account, recursive, per-source isolation, `npm run drive:source`).
 Slice 4 done: metadata-only classification (index tree -> semester/subject/topic, category tags, Drive matching), apply, search (FTS + aliases + trigram), browse. Tested on real Postgres (PGlite) with the full channel structure.
-Next: wire syncs into scheduler, OpenWA adapter + conversation flow, delivery, admin commands.
+Slice 5 done: OpenWA adapter (signed webhook in, send-text out), per-participant persistent sessions, conversation engine (browse, search, paging, back/home), group triggers and policies, rate limit, dedupe. Setup: `docs/WHATSAPP_SETUP.md`.
+Next: file delivery with link fallback, sync scheduler, admin commands, backups.
