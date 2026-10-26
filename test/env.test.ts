@@ -16,3 +16,24 @@ describe("loadEnv", () => {
     expect(env.ADMIN_IDS).toEqual(["1@c.us", "2@c.us"]);
   });
 });
+
+describe("loadEnv provider modes", () => {
+  const base = { DATABASE_URL: "postgres://x" };
+  it("openwa mode requires the gateway settings", () => {
+    expect(() => loadEnv(base)).toThrow(/OPENWA_API_KEY: is required/);
+  });
+  it("baileys mode needs only an admin token, not OpenWA values", () => {
+    expect(() => loadEnv({ ...base, WHATSAPP_PROVIDER: "baileys" })).toThrow(
+      /ADMIN_HTTP_TOKEN: is required/,
+    );
+    expect(() =>
+      loadEnv({ ...base, WHATSAPP_PROVIDER: "baileys", ADMIN_HTTP_TOKEN: "short" }),
+    ).toThrow(/>= 16/);
+    const env = loadEnv({
+      ...base,
+      WHATSAPP_PROVIDER: "baileys",
+      ADMIN_HTTP_TOKEN: "x".repeat(16),
+    });
+    expect(env.WHATSAPP_PROVIDER).toBe("baileys");
+  });
+});

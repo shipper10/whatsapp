@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { loadEnv } from "../config/env.js";
 import { createDb } from "./client.js";
 
 export async function runMigrations(databaseUrl: string) {
@@ -15,6 +14,8 @@ export async function runMigrations(databaseUrl: string) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  await runMigrations(loadEnv().DATABASE_URL);
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL: is required (missing)");
+  await runMigrations(url);
   console.log("migrations applied");
 }

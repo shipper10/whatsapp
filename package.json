@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node dist/db/migrate.js && node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",
@@ -21,10 +21,12 @@
   },
   "dependencies": {
     "@googleapis/drive": "^27.0.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "drizzle-orm": "^0.45.4",
     "google-auth-library": "^11.3.1",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
+    "qrcode": "^1.5.4",
     "teleproto": "^1.232.0",
     "zod": "^4.6.7"
   },
@@ -35,6 +37,7 @@
     "@electric-sql/pglite-tools": "^0.4.11",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

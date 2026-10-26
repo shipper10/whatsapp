@@ -108,6 +108,14 @@ export const settingsRegistry = {
     restart: false,
     description: "Allowed MIME prefixes/types for attachments. Empty = allow all.",
   }),
+  "whatsapp.minSendGapMs": def({
+    schema: z.coerce.number().int().min(0).max(10000),
+    default: 800,
+    envName: "WHATSAPP_MIN_SEND_GAP_MS",
+    restart: false,
+    description:
+      "Minimum pause between outgoing WhatsApp messages (smooths bursts; lowers restriction risk).",
+  }),
   "delivery.timeoutSeconds": def({
     schema: z.coerce.number().int().min(1).max(900),
     default: 120,

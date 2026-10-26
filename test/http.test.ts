@@ -22,10 +22,12 @@ afterEach(() => {
 async function start() {
   const got: { id: string; msg: IncomingMessage }[] = [];
   const server = createAppServer({
-    webhookSecret: SECRET,
-    sessionId: "s1",
+    webhook: {
+      secret: SECRET,
+      sessionId: "s1",
+      onMessage: async (id, msg) => void got.push({ id, msg }),
+    },
     health: async () => true,
-    onMessage: async (id, msg) => void got.push({ id, msg }),
     logger: { warn: () => {}, error: () => {} },
   });
   servers.push(server);
@@ -64,5 +66,47 @@ describe("http server", () => {
       headers: { "x-openwa-signature": "sha256=0" },
     }).catch(() => null);
     expect(res === null || res.status === 413).toBe(true);
+  });
+});
+
+describe("lite-mode link admin", () => {
+  async function startLink(state: { state: string; qr?: string }) {
+    const server = createAppServer({
+      link: {
+        token: "t".repeat(20),
+        status: () => state,
+        pairingCode: async (p) =>
+          p === "249912345678" ? "ABCD-1234" : Promise.reject(new Error("already linked")),
+      },
+      health: async () => true,
+      logger: { warn: () => {}, error: () => {} },
+    });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, r));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
+
+  it("requires the token, never serves the webhook, renders a QR", async () => {
+    const url = await startLink({ state: "qr", qr: "2@abc,def,ghi" });
+    expect((await fetch(`${url}/admin/link`)).status).toBe(401);
+    expect((await fetch(`${url}/admin/link?token=wrong`)).status).toBe(401);
+    const ok = await fetch(`${url}/admin/link?token=${"t".repeat(20)}`);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toContain("<svg");
+    expect((await fetch(`${url}/webhooks/openwa`, { method: "POST", body: "{}" })).status).toBe(
+      404,
+    );
+    expect((await fetch(`${url}/healthz`)).status).toBe(200);
+  });
+
+  it("issues pairing codes with Bearer auth and validates the phone", async () => {
+    const url = await startLink({ state: "qr", qr: "x" });
+    const h = { authorization: `Bearer ${"t".repeat(20)}` };
+    const good = await fetch(`${url}/admin/link/pair?phone=249912345678`, { headers: h });
+    expect(await good.text()).toContain("ABCD-1234");
+    expect((await fetch(`${url}/admin/link/pair?phone=abc`, { headers: h })).status).toBe(400);
+    expect((await fetch(`${url}/admin/link/pair?phone=249900000000`, { headers: h })).status).toBe(
+      409,
+    );
   });
 });

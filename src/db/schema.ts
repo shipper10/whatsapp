@@ -245,3 +245,10 @@ export const deliveryLogs = pgTable("delivery_logs", {
   outcome: text("outcome").notNull(), // 'file_sent' | 'links_only' | 'unavailable'
   error: text("sanitized_error"),
 });
+
+/** WhatsApp (Baileys) login + signal keys, so the session survives restarts on hosts with ephemeral disks. */
+export const waAuthState = pgTable("wa_auth_state", {
+  name: text("name").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: touched(),
+});

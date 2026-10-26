@@ -18,7 +18,9 @@ import { SyncScheduler } from "./jobs/scheduler.js";
 import { classifyAndApply } from "./library/apply.js";
 import { DbLibrary } from "./library/dbLibrary.js";
 import { createLogger } from "./logger.js";
+import { BaileysProvider } from "./providers/whatsapp/baileys/provider.js";
 import { OpenWaProvider } from "./providers/whatsapp/openwa.js";
+import type { IncomingMessage, WhatsAppProvider } from "./providers/whatsapp/types.js";
 import { DbSettingsStore, SettingsService } from "./settings/service.js";
 import { TelegramRuntime } from "./telegram/runtime.js";
 import { DbTelegramStore } from "./telegram/store.js";
@@ -56,11 +58,25 @@ const driveClientFor = (credentialRef: string) => {
 };
 
 // --- WhatsApp + bot
-const provider = new OpenWaProvider({
-  baseUrl: env.OPENWA_BASE_URL,
-  apiKey: env.OPENWA_API_KEY,
-  sessionId: env.OPENWA_SESSION_ID,
-});
+// Lite mode: Baileys inside this process, login kept in Postgres. Messages reach the handler via this late-bound hook.
+let onIncoming: (id: string, msg: IncomingMessage) => Promise<void> = async () => undefined;
+const baileys =
+  env.WHATSAPP_PROVIDER === "baileys"
+    ? new BaileysProvider({
+        db,
+        logger: log,
+        baileysLogger: createLogger("warn"),
+        onMessage: (id, msg) => onIncoming(id, msg),
+        minSendGapMs: () => settings.get("whatsapp.minSendGapMs"),
+      })
+    : null;
+const provider: WhatsAppProvider =
+  baileys ??
+  new OpenWaProvider({
+    baseUrl: env.OPENWA_BASE_URL,
+    apiKey: env.OPENWA_API_KEY ?? "",
+    sessionId: env.OPENWA_SESSION_ID ?? "",
+  });
 const library = new DbLibrary(db);
 const sessions = new DbSessionStore(db);
 
@@ -131,20 +147,38 @@ const handler = createHandler({
   adminHook,
 });
 
+onIncoming = (id, msg) => handler.handle(id, msg);
+
 const server = createAppServer({
-  webhookSecret: env.OPENWA_WEBHOOK_SECRET,
-  sessionId: env.OPENWA_SESSION_ID,
+  webhook: baileys
+    ? undefined
+    : {
+        secret: env.OPENWA_WEBHOOK_SECRET ?? "",
+        sessionId: env.OPENWA_SESSION_ID ?? "",
+        onMessage: (id, msg) => handler.handle(id, msg),
+      },
+  link:
+    baileys && env.ADMIN_HTTP_TOKEN
+      ? {
+          token: env.ADMIN_HTTP_TOKEN,
+          status: () => baileys.status(),
+          pairingCode: (phone) => baileys.requestPairingCode(phone),
+        }
+      : undefined,
   health: async () => {
     await pool.query("select 1");
     return true;
   },
-  onMessage: (id, msg) => handler.handle(id, msg),
   logger: log,
 });
 
 server.listen(env.PORT, async () => {
   log.info({ port: env.PORT, cohort: await settings.get("cohort.label") }, "server started");
 });
+if (baileys) {
+  await baileys.start();
+  log.info({}, "WhatsApp (Baileys) starting; open /admin/link?token=... to link if not linked yet");
+}
 if (env.ENABLE_SCHEDULER) scheduler.start();
 
 const maintenance = setInterval(async () => {
@@ -167,6 +201,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     clearInterval(maintenance);
     scheduler.stop();
     server.close();
-    void Promise.allSettled([telegram?.close(), pool.end()]).then(() => process.exit(0));
+    void Promise.allSettled([baileys?.stop(), telegram?.close(), pool.end()]).then(() =>
+      process.exit(0),
+    );
   });
 }

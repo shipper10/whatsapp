@@ -77,3 +77,7 @@ Checked in the OpenWA source (shallow clone, last commit 2026-10-21, v0.25.0):
 5. Provider adapter + session state machine + webhook receiver (per-participant key).
 6. Delivery with link fallback.
 7. Admin commands, backups, docs.
+
+## 8. Update 2026-10-26: lite mode (direct Baileys)
+
+Decision: free hosts that need no card (bot-hosting.net, Wispbyte) cannot run Docker or a separate OpenWA container, and Oracle sign-up was not possible. Added `WHATSAPP_PROVIDER=baileys`: the bot uses `@whiskeysockets/baileys` directly behind the same `WhatsAppProvider` interface, with the login and Signal keys stored in Postgres (`wa_auth_state`), so ephemeral disks are fine. OpenWA mode is unchanged and remains the recommended setup where Docker is available. Ban risk is accepted by the owner. Measured idle RSS about 140 MB (no Telegram/Drive activity), so a 256 MB host is plausible but unproven under sync load.

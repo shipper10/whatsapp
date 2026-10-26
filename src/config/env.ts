@@ -6,7 +6,7 @@ import { z } from "zod";
  */
 const bool = z.enum(["true", "false"]).transform((v) => v === "true");
 
-export const envSchema = z.object({
+const baseSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error"]).default("info"),
   APP_TIMEZONE: z.string().default("Africa/Khartoum"),
@@ -14,11 +14,14 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
   // WhatsApp gateway (OpenWA)
-  WHATSAPP_PROVIDER: z.enum(["openwa"]).default("openwa"),
+  // "openwa" = separate gateway container; "baileys" = lite mode, one process, login stored in Postgres.
+  WHATSAPP_PROVIDER: z.enum(["openwa", "baileys"]).default("openwa"),
   OPENWA_BASE_URL: z.string().url().default("http://openwa:2785"),
-  OPENWA_API_KEY: z.string().min(1, "OPENWA_API_KEY is required"),
-  OPENWA_SESSION_ID: z.string().min(1, "OPENWA_SESSION_ID is required"),
-  OPENWA_WEBHOOK_SECRET: z.string().min(16, "OPENWA_WEBHOOK_SECRET must be >= 16 chars"),
+  OPENWA_API_KEY: z.string().optional(),
+  OPENWA_SESSION_ID: z.string().optional(),
+  OPENWA_WEBHOOK_SECRET: z.string().optional(),
+  // Lite mode: protects /admin/link (QR page). Required when WHATSAPP_PROVIDER=baileys.
+  ADMIN_HTTP_TOKEN: z.string().optional(),
 
   // Telegram (GramJS). Optional until the Telegram sync slice is enabled.
   TELEGRAM_API_ID: z.coerce.number().int().optional(),
@@ -46,7 +49,28 @@ export const envSchema = z.object({
   ENABLE_SCHEDULER: bool.default(true),
 });
 
-export type Env = z.infer<typeof envSchema>;
+export const envSchema = baseSchema.superRefine((e, ctx) => {
+  const need = (key: string, ok: boolean, msg: string) => {
+    if (!ok) ctx.addIssue({ code: "custom", path: [key], message: msg });
+  };
+  if (e.WHATSAPP_PROVIDER === "openwa") {
+    need("OPENWA_API_KEY", !!e.OPENWA_API_KEY, "OPENWA_API_KEY is required");
+    need("OPENWA_SESSION_ID", !!e.OPENWA_SESSION_ID, "OPENWA_SESSION_ID is required");
+    need(
+      "OPENWA_WEBHOOK_SECRET",
+      (e.OPENWA_WEBHOOK_SECRET?.length ?? 0) >= 16,
+      "OPENWA_WEBHOOK_SECRET must be >= 16 chars",
+    );
+  } else {
+    need(
+      "ADMIN_HTTP_TOKEN",
+      (e.ADMIN_HTTP_TOKEN?.length ?? 0) >= 16,
+      "ADMIN_HTTP_TOKEN must be >= 16 chars",
+    );
+  }
+});
+
+export type Env = z.infer<typeof baseSchema>;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const parsed = envSchema.safeParse(source);
