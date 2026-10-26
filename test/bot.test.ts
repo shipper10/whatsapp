@@ -14,8 +14,19 @@ const inGroup = (who: string, text: string) =>
   msg({ conversationId: GROUP, participantId: who, isGroup: true, text });
 const priv = (who: string, text: string) => msg({ conversationId: who, participantId: who, text });
 
+/** The 【n】 number printed next to a label in an index text. */
+const numOf = (text: string, label: string) => {
+  const m = new RegExp(`${label}\\s*【(\\d+)】`).exec(text);
+  if (!m?.[1]) throw new Error(`no number for "${label}" in:\n${text.slice(0, 600)}`);
+  return m[1];
+};
+
 describe("stripTrigger", () => {
-  it("handles Arabic variants, extra words and absence", () => {
+  it("handles symbol prefixes, Arabic word variants, extra words and absence", () => {
+    expect(stripTrigger("!5", ["!"])).toBe("5");
+    expect(stripTrigger("! شيت 1-5", ["!"])).toBe("شيت 1-5");
+    expect(stripTrigger("!", ["!"])).toBe("");
+    expect(stripTrigger("hello! all", ["!"])).toBeNull();
     const tr = ["مكتبة", "library"];
     expect(stripTrigger("المكتبة", ["المكتبة"])).toBe("");
     expect(stripTrigger("مكتبه كيمياء", tr)).toBe("كيمياء");
@@ -25,27 +36,67 @@ describe("stripTrigger", () => {
 });
 
 describe("private chat", () => {
-  it("home -> semester -> subject -> resource delivers verified links", async () => {
-    const bot = await makeBot();
+  const session = async (who: string, bot?: Awaited<ReturnType<typeof makeBot>>) => {
+    const b = bot ?? (await makeBot());
     const run = async (t: string) => {
-      const { id, m } = priv(A, t);
-      await bot.handler.handle(id, m);
-      return bot.provider.last();
+      b.provider.clear();
+      const { id, m } = priv(who, t);
+      await b.handler.handle(id, m);
+      return b.provider.sent.map((x) => x.text).join("\n");
     };
+    return { b, run };
+  };
+
+  it("home shows the channel's main index; numbers open sub-indexes; typed batches send files", async () => {
+    const { b, run } = await session(A);
     const home = await run("0");
-    expect(home).toContain("1. 📁 First Year 1st Semester");
-    expect(home).toContain("🆕");
-    expect(await run("1")).toContain("1. 📁 Cell Biology");
-    const subject = await run("2"); // Chemistry
-    expect(subject).toContain("Chemistry");
-    bot.provider.clear();
-    await run("1"); // first file in Chemistry
-    const links = bot.provider.last();
-    expect(links).toMatch(/Telegram: https:\/\/t\.me\/BahriMed\/\d+/);
-    expect(links).not.toContain("Google Drive"); // no Drive copy exists: never invented
-    // back returns to the semester list, home resets
-    expect(await run("رجوع")).toContain("Chemistry");
-    expect(await run("٠")).toContain("1. 📁");
+    expect(home).toContain("Main Index");
+    expect(home).toContain("1st Semester【1】");
+    expect(home).toContain("2nd Semester【2】");
+
+    const sem1 = await run("1");
+    expect(sem1).toContain("Cell Biology");
+    const chem = await run(numOf(sem1, "Chemistry"));
+    expect(chem).toContain("Chemistry Index");
+
+    const out = await run("sheet 1");
+    expect(out).toContain("⏳"); // more than one file: a heads-up
+    expect(b.provider.sent.map((x) => x.text).join("\n")).toMatch(/https:\/\/t\.me\/BahriMed\/\d+/);
+
+    expect(await run("رجوع")).toContain("Cell Biology"); // back to the semester index
+    expect(await run("٠")).toContain("Main Index");
+  });
+
+  it("semester 2 is browsable too", async () => {
+    const { run } = await session(B);
+    await run("0");
+    const sem2 = await run("2");
+    expect(sem2).toContain("Biomolecules");
+    expect(sem2).toContain("Homeostasis");
+    const sub = await run(numOf(sem2, "Biomolecules"));
+    expect(sub).toContain("Biomolecules Index");
+  });
+
+  it("sends a numeric range of files, capped by delivery.maxBatch, and says what it skipped", async () => {
+    const { b, run } = await session(C);
+    await run("0");
+    const sem1 = await run("1");
+    const cell = await run(numOf(sem1, "Cell Biology"));
+    const lectures = await run("lecture 1-3"); // typed range
+    expect(lectures).toContain("3"); // "sending 3 files"
+    const sentFiles = b.provider.sent.filter((s) => /t\.me\/BahriMed\/\d+/.test(s.text));
+    expect(sentFiles.length).toBe(3);
+
+    // plain numbers and ranges address the 【】 numbers
+    b.provider.clear();
+    await run("1-2");
+    expect(b.provider.sent.filter((s) => /t\.me\/BahriMed\/\d+/.test(s.text)).length).toBe(2);
+
+    await b.settings.set("delivery.maxBatch", 2, "test");
+    const capped = await run("all sheets");
+    expect(capped).toContain("2"); // first 2 only
+    expect(cell).toContain("Cell division");
+    expect(await run("sheet 99")).toContain("لم أجد");
   });
 
   it("free text searches (Arabic digits and commands work), pages, and reports no results", async () => {
@@ -76,7 +127,7 @@ describe("private chat", () => {
     await send(bot.handler, "1"); // inside semester 1
     const restarted = bot.makeHandler(); // new process, same DB
     t += 60_000;
-    expect(await send(restarted, "back")).toContain("1. 📁"); // stack restored from DB: back to home list
+    expect(await send(restarted, "back")).toContain("Main Index"); // stack restored from DB
     await send(restarted, "1");
     t += 6 * 60_000; // expired
     const fresh = await send(restarted, "2"); // a bare number with no session => home, not an action on stale state
@@ -84,39 +135,67 @@ describe("private chat", () => {
   });
 });
 
-describe("groups: independent sessions per participant", () => {
-  it("stays silent unless addressed, then keeps each member's menu separate", async () => {
-    const bot = await makeBot();
-    const say = async (who: string, text: string) => {
+describe("groups: addressed only by prefix or by replying to the bot", () => {
+  const harness = async (env?: NodeJS.ProcessEnv) => {
+    const bot = await makeBot({ env });
+    const say = async (who: string, text: string, extra: object = {}) => {
       bot.provider.clear();
-      const { id, m } = inGroup(who, text);
+      const { id, m } = msg({
+        conversationId: GROUP,
+        participantId: who,
+        isGroup: true,
+        text,
+        ...extra,
+      });
       await bot.handler.handle(id, m);
       return bot.provider.sent;
     };
+    return { bot, say };
+  };
 
-    expect(await say(C, "good morning all")).toHaveLength(0); // not addressed
-    const a1 = await say(A, "مكتبة");
-    expect(a1).toHaveLength(1);
+  it("ignores everything except !prefix messages and replies to the bot", async () => {
+    const { bot, say } = await harness();
+    expect(await say(C, "good morning all")).toHaveLength(0);
+    expect(await say(C, "1")).toHaveLength(0);
+
+    const a1 = await say(A, "!");
+    expect(a1.length).toBeGreaterThan(0);
     expect(a1[0]?.conversationId).toBe(GROUP);
     expect(a1[0]?.quoteMessageId).toBeTruthy(); // reply quotes the asker
-    await say(B, "library");
 
-    // A opens semester 1, B opens semester 2: simultaneously, different views
-    const [a2, b2] = await Promise.all(
-      [say(A, "1"), say(B, "2")].map(async (p) => (await p)[0]?.text ?? ""),
-    );
-    expect(a2).toBeDefined();
-    expect(b2).toBeDefined();
+    // an active session no longer makes the bot answer every message of that person
+    expect(await say(A, "thanks everyone")).toHaveLength(0);
+    expect(await say(A, "1")).toHaveLength(0);
 
-    const aView = (await say(A, "0"))[0]?.text ?? "";
-    expect(aView).toContain("📚");
-    // B still inside semester 2 even though A went home
-    const bNext = (await say(B, "back"))[0]?.text ?? "";
-    expect(bNext).toContain("📚");
+    const viaPrefix = await say(A, "!1");
+    expect(viaPrefix.map((x) => x.text).join("\n")).toContain("Cell Biology");
 
-    // C never started a session: numbers from C are ignored, A's session is untouched
-    expect(await say(C, "1")).toHaveLength(0);
+    // replying to the bot's own message continues the conversation without the prefix
+    const botMsgId = bot.provider.lastId();
+    const viaReply = await say(A, "0", { replyToMessageId: botMsgId });
+    expect(viaReply.map((x) => x.text).join("\n")).toContain("Main Index");
+
+    // replying to somebody else's message is not addressed to the bot
+    expect(await say(A, "0", { replyToMessageId: "someone-else" })).toHaveLength(0);
+    // the provider can also say the quoted message was the bot's (survives restarts)
+    expect(
+      (await say(A, "0", { replyToMessageId: "old", replyToFromMe: true })).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("keeps each member's menu separate", async () => {
+    const { bot, say } = await harness();
+    await say(A, "!");
+    await say(B, "!");
+    await Promise.all([say(A, "!1"), say(B, "!2")]);
     const sess = await bot.db.query.userSessions.findMany();
+    const view = (p: string) =>
+      (
+        sess.find((s) => s.participantId === p && s.conversationId === GROUP)?.sessionDataJson as {
+          view: { messageId: number };
+        }
+      ).view;
+    expect(view(A).messageId).not.toBe(view(B).messageId);
     const keys = sess
       .filter((s) => s.conversationId === GROUP)
       .map((s) => s.participantId)
@@ -124,43 +203,18 @@ describe("groups: independent sessions per participant", () => {
     expect(keys).toEqual([A, B]);
   });
 
-  it("two members navigate to different places at the same time without crossover", async () => {
-    const bot = await makeBot();
-    const go = async (who: string, text: string) => {
-      const { id, m } = inGroup(who, text);
-      await bot.handler.handle(id, m);
-    };
-    await go(A, "مكتبة");
-    await go(B, "مكتبة");
-    bot.provider.clear();
-    await Promise.all([go(A, "1"), go(B, "2")]);
-    const sess = await bot.db.query.userSessions.findMany();
-    const view = (p: string) =>
-      (
-        sess.find((s) => s.participantId === p && s.conversationId === GROUP)?.sessionDataJson as {
-          view: { nodeId: number };
-        }
-      ).view;
-    expect(view(A).nodeId).not.toBe(view(B).nodeId);
-  });
-
   it("answers in a private-only policy with a pointer to private chat, and honours group.mode=disabled", async () => {
-    const bot = await makeBot({ env: { GROUP_REPLY_MODE: "private_only" } });
-    const { id, m } = inGroup(A, "مكتبة");
-    await bot.handler.handle(id, m);
+    const { bot, say } = await harness({ GROUP_REPLY_MODE: "private_only" });
+    await say(A, "!");
     expect(bot.provider.last()).toContain("الخاص");
 
-    const off = await makeBot({ env: { GROUP_MODE: "disabled" } });
-    const x = inGroup(A, "مكتبة");
-    await off.handler.handle(x.id, x.m);
-    expect(off.provider.sent).toHaveLength(0);
+    const off = await harness({ GROUP_MODE: "disabled" });
+    expect(await off.say(A, "!")).toHaveLength(0);
   });
 
   it("refuses to share state when the sender cannot be identified", async () => {
-    const bot = await makeBot();
-    const { id, m } = inGroup("", "مكتبة");
-    await bot.handler.handle(id, m);
-    expect(bot.provider.sent).toHaveLength(0);
+    const { bot, say } = await harness();
+    expect(await say("", "!")).toHaveLength(0);
     expect(bot.logs.join(" ")).toContain("without participant id");
   });
 });

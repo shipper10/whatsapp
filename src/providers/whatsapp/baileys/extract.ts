@@ -22,7 +22,9 @@ const preferPhone = (...ids: (string | null | undefined)[]): string => {
  * (own messages, status/broadcast/newsletter, non-text). In groups the participant is the real sender,
  * never the group; if it cannot be determined participantId is "" and the session layer refuses.
  */
-export function extractIncoming(m: WAMessage): IncomingMessage | null {
+export function extractIncoming(
+  m: WAMessage,
+): (IncomingMessage & { replyToParticipant?: string }) | null {
   const key = m.key;
   if (!key || key.fromMe || !key.remoteJid || !key.id) return null;
   const chat = key.remoteJid;
@@ -46,5 +48,7 @@ export function extractIncoming(m: WAMessage): IncomingMessage | null {
     timestamp: toNumber(m.messageTimestamp),
     fromMe: false,
     mentionedIds: content?.extendedTextMessage?.contextInfo?.mentionedJid ?? [],
+    replyToMessageId: content?.extendedTextMessage?.contextInfo?.stanzaId ?? undefined,
+    replyToParticipant: content?.extendedTextMessage?.contextInfo?.participant ?? undefined,
   };
 }

@@ -24,6 +24,31 @@ const M = {
     ar: "اختيار غير صحيح. أرسل رقمًا من القائمة، أو 0 للرئيسية.",
     en: "Invalid choice. Send a number from the list, or 0 for home.",
   },
+  indexFooter: {
+    ar: "✍️ أرسل رقم 【】 للفتح أو الإرسال: *5* أو *1-5* أو *3,7,9*\n📦 بالنوع: *شيت 1-5* • *محاضرة 2-4* • *كل الشيتات*\n🏠 0 الرئيسية  •  ↩️ رجوع  •  أو اكتب كلمة للبحث",
+    en: "✍️ Send a 【】 number to open/send: *5*, *1-5* or *3,7,9*\n📦 By type: *sheet 1-5* • *lecture 2-4* • *all sheets*\n🏠 0 Home  •  ↩️ back  •  or type a word to search",
+  },
+  indexMissing: {
+    ar: "هذا الفهرس غير متاح بعد (لم تتم مزامنته). اكتب 0 للرئيسية.",
+    en: "This index isn't available yet (not synced). Send 0 for home.",
+  },
+  noTyped: {
+    ar: "لم أجد هذه العناصر في هذا الفهرس. استخدم الأرقام 【】 الظاهرة بجانب كل ملف.",
+    en: "I couldn't find those items in this index. Use the 【】 numbers shown next to each file.",
+  },
+  notSynced: {
+    ar: "⚠️ بعض الملفات لم تُزامَن بعد ولن تُرسل:",
+    en: "⚠️ Some files aren't synced yet and were skipped:",
+  },
+  navSkipped: {
+    ar: "ℹ️ تجاهلتُ الفهارس المختارة؛ افتح كل فهرس برقمه وحده.",
+    en: "ℹ️ I skipped the selected indexes; open an index by sending only its number.",
+  },
+  capped: {
+    ar: "ℹ️ سأرسل أول {n} ملفات فقط في الطلب الواحد. أعد الطلب بالباقي.",
+    en: "ℹ️ I'll send only the first {n} files per request. Ask again for the rest.",
+  },
+  sendingMany: { ar: "⏳ جاري إرسال {n} ملفات…", en: "⏳ Sending {n} files…" },
   noMore: { ar: "لا توجد صفحات أخرى.", en: "No more pages." },
   groupPrivateOnly: {
     ar: "للاستخدام الكامل يُرجى مراسلتي على الخاص 🔒",

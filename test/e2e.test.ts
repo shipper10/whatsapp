@@ -141,26 +141,28 @@ describe("full application over HTTP with real Postgres and a fake OpenWA", () =
     expect(res.status).toBe(401);
   });
 
-  it("answers the menu, navigates, and delivers links in a private chat", async () => {
+  it("answers the menu, navigates the channel's own index, and delivers files by number", async () => {
     const home = await say("0");
     expect(home[0]?.path).toBe("/api/sessions/s1/messages/send-text");
-    expect(home[0]?.body.text).toContain("1. 📁 First Year 1st Semester");
-    await say("1");
-    await say("2"); // Chemistry
-    const out = await say("1");
+    expect(home[0]?.body.text).toContain("Main Index");
+    const sem1 = (await say("1")).map((o) => o.body.text).join("\n");
+    const chem = /Chemistry\s*【(\d+)】/.exec(sem1)?.[1];
+    expect(chem).toBeTruthy();
+    await say(chem as string);
+    const out = await say("sheet 1-2");
     const links = out.map((o) => o.body.text).join("\n");
     expect(links).toMatch(/https:\/\/t\.me\/BahriMed\/\d+/);
   });
 
-  it("serves two group members independently, quoting each asker", async () => {
+  it("serves two group members independently, quoting each asker, only when addressed", async () => {
     const G = "120363@g.us";
-    const a = await say("مكتبة", "249922222222@c.us", G);
+    const a = await say("!", "249922222222@c.us", G);
     expect(a[0]?.body.chatId).toBe(G);
     expect(a[0]?.body.quotedMessageId).toBeTruthy();
-    await say("library", "249933333333@c.us", G);
-    await say("1", "249922222222@c.us", G);
-    const b = await say("2", "249933333333@c.us", G);
-    expect(b[0]?.body.text).toContain("📂");
+    await say("!", "249933333333@c.us", G);
+    await say("!1", "249922222222@c.us", G);
+    const b = await say("!2", "249933333333@c.us", G);
+    expect(b.map((x) => x.body.text).join("\n")).toContain("Biomolecules");
     const silent = await say("hello all", "249944444444@c.us", G).catch(() => []);
     expect(silent).toHaveLength(0);
   });

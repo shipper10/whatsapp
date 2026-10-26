@@ -5,7 +5,7 @@ import type { DeliveryLog } from "./fileDeliverer.js";
 export class DbDeliveryLog implements DeliveryLog {
   constructor(private readonly db: Db) {}
   async record(
-    resourceId: number,
+    resourceId: number | null,
     outcome: "file_sent" | "links_only" | "unavailable",
     sanitizedError?: string,
   ) {

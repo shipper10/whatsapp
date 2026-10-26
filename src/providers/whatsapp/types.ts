@@ -15,6 +15,10 @@ export interface IncomingMessage {
   timestamp: number;
   fromMe: boolean;
   mentionedIds: string[];
+  /** Id of the message this one replies to, when the provider reports it. */
+  replyToMessageId?: string;
+  /** True when that quoted message was sent by this bot's own account. */
+  replyToFromMe?: boolean;
 }
 
 export interface OutgoingText {
@@ -44,4 +48,6 @@ export interface WhatsAppProvider {
   readonly name: string;
   sendText(msg: OutgoingText): Promise<SendResult>;
   sendDocument(msg: OutgoingDocument): Promise<SendResult>;
+  /** Whether a message id was sent by this bot (lets groups treat replies to the bot as addressed to it). */
+  isOwnMessage?(messageId: string): boolean;
 }

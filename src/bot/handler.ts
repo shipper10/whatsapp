@@ -25,17 +25,26 @@ export interface HandlerDeps {
   now?: () => number;
 }
 
-/** Strips a leading trigger word ("مكتبة", "lib") from a group message. Returns null when absent. */
+/**
+ * Strips the prefix that addresses the bot in a group. A symbol prefix ("!") may be glued to the text
+ * ("!5", "!sheet 1-5"); a word prefix ("lib") must be followed by a space. Returns null when absent.
+ */
 export function stripTrigger(text: string, triggers: string[]): string | null {
-  const norm = normalizeText(text);
+  const trimmed = text.trim();
+  const norm = normalizeText(trimmed);
   for (const trig of triggers) {
-    const n = normalizeText(trig);
+    const raw = trig.trim();
+    if (!raw) continue;
+    if (/^[^\p{L}\p{N}\s]+$/u.test(raw)) {
+      if (trimmed.startsWith(raw)) return trimmed.slice(raw.length).trim();
+      continue;
+    }
+    const n = normalizeText(raw);
     if (!n) continue;
     if (norm === n) return "";
     if (norm.startsWith(`${n} `)) {
-      // remove the same number of leading words from the original text
       const words = n.split(" ").length;
-      return text.trim().split(/\s+/).slice(words).join(" ");
+      return trimmed.split(/\s+/).slice(words).join(" ");
     }
   }
   return null;
@@ -47,12 +56,21 @@ export function createHandler(deps: HandlerDeps) {
   const dedupe = new Deduper();
   const nowMs = deps.now ?? Date.now;
 
+  /** Ids of messages this handler sent, so replies to them count as addressed to the bot. */
+  const sentIds = new Set<string>();
+  const rememberSent = (id?: string) => {
+    if (!id) return;
+    sentIds.add(id);
+    if (sentIds.size > 1000) sentIds.delete(sentIds.values().next().value as string);
+  };
+
   async function reply(msg: IncomingMessage, text: string) {
     const res = await deps.provider.sendText({
       conversationId: msg.conversationId,
       text,
       quoteMessageId: msg.isGroup ? msg.messageId : undefined,
     });
+    rememberSent(res.providerMessageId);
     if (!res.confirmed)
       deps.logger.warn(
         { error: res.error, conversation: msg.conversationId },
@@ -72,6 +90,8 @@ export function createHandler(deps: HandlerDeps) {
       groupReply,
       triggers,
       rate,
+      rootIndexId,
+      maxBatch,
     ] = await Promise.all([
       deps.settings.get("bot.language"),
       deps.settings.get("search.pageSize"),
@@ -83,8 +103,10 @@ export function createHandler(deps: HandlerDeps) {
       deps.settings.get("group.replyMode"),
       deps.settings.get("group.triggers"),
       deps.settings.get("rateLimit.perParticipantPerMinute"),
+      deps.settings.get("library.rootIndexMessageId"),
+      deps.settings.get("delivery.maxBatch"),
     ]);
-    const cfg: BotConfig = { pageSize, maxResults, welcome, cohort, lang };
+    const cfg: BotConfig = { pageSize, maxResults, welcome, cohort, lang, rootIndexId, maxBatch };
 
     if (msg.isGroup && groupMode === "disabled") return;
 
@@ -108,8 +130,14 @@ export function createHandler(deps: HandlerDeps) {
       let text = msg.text;
 
       if (msg.isGroup) {
+        // In a group the bot speaks only when addressed: by the prefix, or by replying to one of its messages.
         const stripped = stripTrigger(msg.text, triggers);
-        if (stripped === null && !existing) return; // not addressed to the bot, stay silent
+        const repliedToBot =
+          msg.replyToFromMe === true ||
+          (msg.replyToMessageId !== undefined &&
+            (sentIds.has(msg.replyToMessageId) ||
+              deps.provider.isOwnMessage?.(msg.replyToMessageId) === true));
+        if (stripped === null && !repliedToBot) return;
         if (stripped !== null) text = stripped === "" ? "0" : stripped;
         if (groupReply === "private_only") {
           if (stripped !== null) await reply(msg, t("groupPrivateOnly", lang));
@@ -128,11 +156,13 @@ export function createHandler(deps: HandlerDeps) {
       const turn = await step(deps.library, cfg, existing, text);
       await deps.sessions.save(key, turn.state, ttl);
       for (const r of turn.replies) await reply(msg, r);
-      if (turn.deliver !== undefined) {
-        await deps.deliverer.deliver(turn.deliver, {
+      if (turn.deliver) {
+        const target = {
           conversationId: msg.conversationId,
           quoteMessageId: msg.isGroup ? msg.messageId : undefined,
-        });
+        };
+        for (const id of turn.deliver.resources) await deps.deliverer.deliver(id, target);
+        for (const id of turn.deliver.messages) await deps.deliverer.deliverMessage(id, target);
       }
     });
   }

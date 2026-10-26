@@ -108,6 +108,21 @@ export const settingsRegistry = {
     restart: false,
     description: "Allowed MIME prefixes/types for attachments. Empty = allow all.",
   }),
+  "delivery.maxBatch": def({
+    schema: z.coerce.number().int().min(1).max(50),
+    default: 15,
+    envName: "DELIVERY_MAX_BATCH",
+    restart: false,
+    description: "Most files sent for one request (e.g. 'sheet 1-5').",
+  }),
+  "library.rootIndexMessageId": def({
+    schema: z.coerce.number().int().min(0),
+    default: 0,
+    envName: "LIBRARY_ROOT_INDEX_ID",
+    restart: false,
+    description:
+      "Telegram message id of the main index shown on the home screen. 0 = detect automatically.",
+  }),
   "whatsapp.minSendGapMs": def({
     schema: z.coerce.number().int().min(0).max(10000),
     default: 800,
@@ -165,10 +180,10 @@ export const settingsRegistry = {
   }),
   "group.triggers": def({
     schema: z.array(z.string().min(1)),
-    default: ["مكتبة", "المكتبة", "library", "lib"],
+    default: ["!"],
     restart: false,
     description:
-      "Words that start an interaction in a group. Active sessions continue without them.",
+      "Prefixes that address the bot in a group (a symbol like ! may be glued to the text: !5). Replying to one of the bot's own messages also addresses it. Everything else in the group is ignored.",
   }),
   "text.welcome": def({
     schema: z.string(),

@@ -1,6 +1,6 @@
 import type { TelegramMediaDownloader } from "../delivery/telegramFetcher.js";
 import { type GramJsConfig, GramJsSource } from "./gramjsSource.js";
-import type { RawTelegramMessage, TelegramSource } from "./types.js";
+import type { RawBatch, TelegramSource } from "./types.js";
 
 /**
  * One shared, lazily connected Telegram client for sync and for delivery downloads.
@@ -37,11 +37,7 @@ export class TelegramRuntime implements TelegramSource, TelegramMediaDownloader 
     return { chatId: s.chatId as bigint, username: s.username };
   }
 
-  async fetchBatch(opts: {
-    minId: number;
-    maxId?: number;
-    limit: number;
-  }): Promise<RawTelegramMessage[]> {
+  async fetchBatch(opts: { minId: number; limit: number }): Promise<RawBatch> {
     const s = await this.ensure();
     try {
       return await s.fetchBatch(opts);

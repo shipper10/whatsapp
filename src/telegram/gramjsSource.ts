@@ -1,7 +1,7 @@
 import { Api, TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions";
 import { FetchTooLargeError } from "../delivery/fetchers.js";
-import type { RawEntity, RawMedia, RawTelegramMessage, TelegramSource } from "./types.js";
+import type { RawBatch, RawEntity, RawMedia, TelegramSource } from "./types.js";
 
 export interface GramJsConfig {
   apiId: number;
@@ -72,19 +72,26 @@ export class GramJsSource implements TelegramSource {
     await this.client.disconnect();
   }
 
-  async fetchBatch(opts: {
-    minId: number;
-    maxId?: number;
-    limit: number;
-  }): Promise<RawTelegramMessage[]> {
+  /** Id of the newest message in the channel (0 when empty). */
+  private async topId(): Promise<number> {
     if (!this.entity) throw new Error("GramJsSource.connect() not called");
-    const msgs = await this.client.getMessages(this.entity, {
-      minId: opts.minId,
-      maxId: opts.maxId ?? 0,
-      limit: opts.limit,
-      reverse: true, // ascending by id
-    });
-    return msgs
+    const [latest] = await this.client.getMessages(this.entity, { limit: 1 });
+    return latest?.id ?? 0;
+  }
+
+  /**
+   * Reads an explicit id window. Asking for ids (instead of "newer than X, N at a time") makes the result
+   * independent of deleted messages and service/pin messages, which used to end a sync early.
+   */
+  async fetchBatch(opts: { minId: number; limit: number }): Promise<RawBatch> {
+    if (!this.entity) throw new Error("GramJsSource.connect() not called");
+    const top = await this.topId();
+    const from = opts.minId + 1;
+    if (from > top) return { messages: [], lastId: opts.minId, exhausted: true };
+    const to = Math.min(top, opts.minId + Math.min(opts.limit, 100));
+    const ids = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+    const msgs = await this.client.getMessages(this.entity, { ids });
+    const messages = msgs
       .filter((m): m is Api.Message => m instanceof Api.Message)
       .map((m) => ({
         id: m.id,
@@ -95,6 +102,7 @@ export class GramJsSource implements TelegramSource {
         media: toMedia(m),
       }))
       .sort((a, b) => a.id - b.id);
+    return { messages, lastId: to, exhausted: to >= top };
   }
 
   /**

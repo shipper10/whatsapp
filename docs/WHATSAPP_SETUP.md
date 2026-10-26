@@ -15,8 +15,9 @@ Run on the host (all commands use the OpenWA API key = `OPENWA_API_KEY` in `.env
    Test it: `POST /api/sessions/<id>/webhooks/<webhookId>/test`.
 5. Send `0` to the number from another phone: the main menu should answer.
 
-Groups: add the bot number to the group. Members start with a trigger word (`مكتبة` / `library`, editable in the
-`group.triggers` setting). Each member then has their own menu; the bot replies by quoting that member.
+Groups: add the bot number to the group. In a group the bot answers **only** when addressed: a message starting with `!` (e.g. `!`, `!1`, `!شيت 1-5`; editable in the `group.triggers` setting) or a reply to one of the bot's own messages. Everything else in the group is ignored, so it never answers a member's ordinary chat. Each member has their own menu; the bot replies by quoting that member.
+
+Using the bot (private chat or `!` in groups): the home screen is the channel's own main index; every file/sub-index has a 【number】. Send `5` to open/send it, `1-5` or `3,7,9` for several, or by type `شيت 1-5`, `محاضرة 2-4`, `كل الشيتات` (at most `delivery.maxBatch` files per request, default 15). Each file arrives with the channel's own text as its caption. Any other text searches.
 
 Notes
 - `SSRF_ALLOWED_HOSTS=bot` in docker-compose.yml is required, otherwise OpenWA refuses to call the bot container.

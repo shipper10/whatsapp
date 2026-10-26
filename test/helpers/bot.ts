@@ -31,9 +31,14 @@ export class FakeProvider implements WhatsAppProvider {
   readonly name = "fake";
   sent: OutgoingText[] = [];
   docs: OutgoingDocument[] = [];
+  private counter = 0;
   async sendText(m: OutgoingText): Promise<SendResult> {
     this.sent.push(m);
-    return { confirmed: true };
+    return { confirmed: true, providerMessageId: `out${++this.counter}` };
+  }
+  /** Id of the most recent message the bot sent (what a user would reply to). */
+  lastId() {
+    return `out${this.counter}`;
   }
   async sendDocument(m: OutgoingDocument): Promise<SendResult> {
     this.docs.push(m);

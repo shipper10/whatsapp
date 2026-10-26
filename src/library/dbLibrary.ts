@@ -2,10 +2,14 @@ import type { LibraryPort } from "../bot/types.js";
 import type { Db } from "../db/client.js";
 import {
   childNodes,
+  indexMessage,
+  messageKinds,
   nodeInfo,
   recentResources,
   resourceDetail,
   resourcesInNode,
+  rootIndexId,
+  telegramMessageDetail,
 } from "./browse.js";
 import { searchResources } from "./search.js";
 
@@ -19,4 +23,8 @@ export class DbLibrary implements LibraryPort {
     searchResources(this.db, query, { limit, offset });
   recent = (limit: number, offset: number) => recentResources(this.db, { limit, offset });
   detail = (id: number) => resourceDetail(this.db, id);
+  indexMessage = (messageId: number) => indexMessage(this.db, messageId);
+  rootIndexId = () => rootIndexId(this.db);
+  messageKinds = (ids: number[]) => messageKinds(this.db, ids);
+  messageDetail = (messageId: number) => telegramMessageDetail(this.db, messageId);
 }

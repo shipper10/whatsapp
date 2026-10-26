@@ -44,8 +44,20 @@ export interface TelegramRecord {
   isIndex: boolean;
 }
 
+/**
+ * One window of channel history. `lastId` is the highest message id the window covered, INCLUDING ids that
+ * produced no message (deleted, service/pin messages). The sync cursor follows `lastId`, never the last
+ * stored message, so gaps can neither stall nor end a sync early.
+ */
+export interface RawBatch {
+  messages: RawTelegramMessage[];
+  lastId: number;
+  /** True when nothing newer than `lastId` exists in the channel. */
+  exhausted: boolean;
+}
+
 /** Abstraction over the Telegram client so sync logic is testable without network. */
 export interface TelegramSource {
-  /** Messages with id > minId (and <= maxId when given), ascending by id. */
-  fetchBatch(opts: { minId: number; maxId?: number; limit: number }): Promise<RawTelegramMessage[]>;
+  /** The window of ids (minId, minId + limit], ascending; messages that do not exist are skipped. */
+  fetchBatch(opts: { minId: number; limit: number }): Promise<RawBatch>;
 }

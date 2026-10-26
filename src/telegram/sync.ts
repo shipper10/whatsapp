@@ -52,17 +52,17 @@ export async function syncTelegram(
         retries,
         sleep,
       );
-      if (batch.length === 0) break;
-      const records = batch.map((m) => parseMessage(m, opts.ctx));
-      const res = await store.upsertMany(records);
-      stats.fetched += batch.length;
-      stats.inserted += res.inserted;
-      stats.updated += res.updated;
-      const maxId = Math.max(...batch.map((m) => m.id));
-      cursor = Math.max(cursor, maxId);
+      if (batch.messages.length > 0) {
+        const res = await store.upsertMany(batch.messages.map((m) => parseMessage(m, opts.ctx)));
+        stats.fetched += batch.messages.length;
+        stats.inserted += res.inserted;
+        stats.updated += res.updated;
+      }
+      // The cursor follows the window, not the stored messages: ids with no message must not stall us.
+      cursor = Math.max(cursor, batch.lastId);
       await store.setCursor(opts.sourceKey, cursor);
-      minId = maxId;
-      if (batch.length < batchSize) break;
+      if (batch.exhausted || batch.lastId <= minId) break;
+      minId = batch.lastId;
     }
     stats.cursor = cursor || null;
     await store.finishRun(runId, "ok", stats);

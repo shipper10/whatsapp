@@ -1,4 +1,11 @@
-import type { NodeInfo, NodeItem, ResourceDetail } from "../library/browse.js";
+import type {
+  IndexMessage,
+  MessageKind,
+  NodeInfo,
+  NodeItem,
+  ResourceDetail,
+} from "../library/browse.js";
+import type { LinkKind } from "../library/indexView.js";
 import type { ResourceHit } from "../library/search.js";
 
 /** What the conversation engine needs from the library. Backed by Postgres in production. */
@@ -9,15 +16,31 @@ export interface LibraryPort {
   search(query: string, limit: number, offset: number): Promise<ResourceHit[]>;
   recent(limit: number, offset: number): Promise<ResourceHit[]>;
   detail(id: number): Promise<ResourceDetail | null>;
+  /** The channel's own index messages, shown as-is with numbered links (no classification needed). */
+  indexMessage(messageId: number): Promise<IndexMessage | null>;
+  rootIndexId(): Promise<number | null>;
+  messageKinds(ids: number[]): Promise<Map<number, MessageKind>>;
+  /** Delivery details for any Telegram message id (files that never became resources included). */
+  messageDetail(messageId: number): Promise<ResourceDetail | null>;
 }
 
 export type Item =
   | { kind: "node"; id: number; label: string }
   | { kind: "resource"; id: number; label: string }
-  | { kind: "action"; id: "recent" | "search"; label: string };
+  | { kind: "action"; id: "recent" | "search"; label: string }
+  /** A numbered link of an index message; `id` is the Telegram message id it points to. */
+  | {
+      kind: "link";
+      id: number;
+      label: string;
+      linkKind: LinkKind;
+      ord: number | null;
+      block: number;
+    };
 
 export type View =
   | { type: "home" }
+  | { type: "index"; messageId: number }
   | { type: "node"; nodeId: number; page: number }
   | { type: "search"; query: string; page: number }
   | { type: "recent"; page: number };
@@ -36,11 +59,15 @@ export interface BotConfig {
   welcome: string;
   cohort: string;
   lang: "ar" | "en";
+  /** 0 = detect the main index automatically. */
+  rootIndexId: number;
+  /** Most files sent for one request. */
+  maxBatch: number;
 }
 
 export interface Turn {
   state: SessionState;
   replies: string[];
-  /** Resource the participant picked; the caller performs delivery. */
-  deliver?: number;
+  /** What the participant picked; the caller performs delivery, in order. */
+  deliver?: { resources: number[]; messages: number[] };
 }

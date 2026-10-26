@@ -54,6 +54,10 @@ const lib = (d: ResourceDetail | null): LibraryPort => ({
   search: async () => [],
   recent: async () => [],
   detail: async () => d,
+  indexMessage: async () => null,
+  rootIndexId: async () => null,
+  messageKinds: async () => new Map(),
+  messageDetail: async () => d,
 });
 
 class FakeFetcher implements FileFetcher {
@@ -114,16 +118,14 @@ async function setup(
 const target = { conversationId: "1@c.us" };
 
 describe("FileDeliverer", () => {
-  it("sends the file, then ALWAYS the verified links, and cleans temp files", async () => {
+  it("sends the file with the channel's text as caption, no extra noise, and cleans temp files", async () => {
     const f = new FakeFetcher("telegram");
     const { provider, deliverer, records, tempDir } = await setup(detail([tg, drv]), [f]);
     await deliverer.deliver(1, target);
     expect(provider.docs).toHaveLength(1);
     expect(provider.docs[0]?.fileName).toBe("Sheet 7.pdf");
-    const text = provider.last();
-    expect(text).toContain("📎 تم إرسال الملف");
-    expect(text).toContain("https://t.me/BahriMed/59");
-    expect(text).toContain("https://drive.google.com/file/d/d1/view");
+    expect(provider.docs[0]?.caption).toBe("Sheet 7");
+    expect(provider.sent).toHaveLength(0); // the file carries its text; no separate links message
     expect(records).toEqual([{ outcome: "file_sent", error: undefined }]);
     expect(readdirSync(tempDir)).toEqual([]);
   });
@@ -242,6 +244,32 @@ describe("FileDeliverer", () => {
     await deliverer.deliver(1, { conversationId: "g@g.us", quoteMessageId: "Q9" });
     expect(provider.docs[0]?.quoteMessageId).toBe("Q9");
     expect(provider.sent.every((s) => s.quoteMessageId === "Q9")).toBe(true);
+  });
+
+  it("uses the Telegram text (without navigation lines or hashtags) as the caption", async () => {
+    const f = new FakeFetcher("telegram");
+    const d = {
+      ...detail([tg]),
+      caption:
+        "📔 Cell Biology Sheet 3\nThe stem cell\n↩️ Return to Cell Biology Index\n#Cell_Biology #Sheet",
+    };
+    const { provider, deliverer } = await setup(d, [f]);
+    await deliverer.deliverMessage(59, target);
+    expect(provider.docs[0]?.caption).toBe("📔 Cell Biology Sheet 3\nThe stem cell");
+  });
+
+  it("sends a text-only post as text with its link", async () => {
+    const f = new FakeFetcher("telegram");
+    const d = {
+      ...detail([{ ...tg, mediaType: null, fileName: null }]),
+      caption: "Exam is on Sunday\n#Notice",
+    };
+    const { provider, deliverer } = await setup(d, [f]);
+    await deliverer.deliverMessage(59, target);
+    expect(f.calls).toBe(0);
+    expect(provider.last()).toContain("Exam is on Sunday");
+    expect(provider.last()).toContain("https://t.me/BahriMed/59");
+    expect(provider.last()).not.toContain("#Notice");
   });
 });
 

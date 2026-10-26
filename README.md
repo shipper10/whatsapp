@@ -50,4 +50,5 @@ Slice 5 done: OpenWA adapter (signed webhook in, send-text out), per-participant
 Slice 6 done: file delivery (Telegram download, optional Drive download, size/type limits, timeout, temp cleanup, links always included, link fallback), sync scheduler (runtime-editable intervals, no overlap, stale detection), end-to-end test of the running app.
 Slice 7 done: admin commands over WhatsApp (status, stats, sync now, settings, Drive sources, review/assign, aliases, admins, audit), daily backups + restore drill, operations guide (`docs/OPERATIONS.md`).
 Lite mode done: `WHATSAPP_PROVIDER=baileys` runs WhatsApp inside the bot process (no Docker, login kept in Postgres) for free hosts without a card. Guide: `docs/LITE_DEPLOYMENT.md`.
+Update: browsing now follows the channel's own index messages (no classification needed), numbered 【n】 links with ranges and typed batches, `!` prefix in groups, captions, and a gap-proof Telegram sync. Drive setup: `docs/DRIVE_SETUP.md`.
 Next: real-account verification (Telegram login, Drive share, WhatsApp link), then polish from live feedback.

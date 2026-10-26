@@ -4,6 +4,7 @@ import { t } from "../bot/messages.js";
 import type { LibraryPort } from "../bot/types.js";
 import { Semaphore } from "../core/concurrency.js";
 import type { ResourceDetail, ResourceSourceDetail } from "../library/browse.js";
+import { cleanCaption } from "../library/indexView.js";
 import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
 import type { FileFetcher } from "./fetchers.js";
@@ -12,7 +13,7 @@ import type { Deliverer, DeliveryTarget } from "./types.js";
 
 export interface DeliveryLog {
   record(
-    resourceId: number,
+    resourceId: number | null,
     outcome: "file_sent" | "links_only" | "unavailable",
     sanitizedError?: string,
   ): Promise<void>;
@@ -50,34 +51,68 @@ export class FileDeliverer implements Deliverer {
   }
 
   async deliver(resourceId: number, target: DeliveryTarget): Promise<void> {
+    await this.run(await this.d.library.detail(resourceId), target, resourceId);
+  }
+
+  async deliverMessage(messageId: number, target: DeliveryTarget): Promise<void> {
+    const detail = await this.d.library.messageDetail(messageId);
+    await this.run(detail, target, detail && detail.id > 0 ? detail.id : null);
+  }
+
+  private async run(
+    detail: ResourceDetail | null,
+    target: DeliveryTarget,
+    logId: number | null,
+  ): Promise<void> {
     const lang = await this.d.settings.get("bot.language");
-    const detail = await this.d.library.detail(resourceId);
     if (!detail) {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
         text: t("unavailable", lang),
         quoteMessageId: target.quoteMessageId,
       });
-      await this.d.log.record(resourceId, "unavailable", "resource not found");
+      await this.d.log.record(logId, "unavailable", "resource not found");
+      return;
+    }
+
+    // A text-only post (announcement, note): the text itself is the content.
+    const textOnly =
+      detail.sources.length > 0 &&
+      detail.sources.every(
+        (s) => s.type === "telegram" && !s.mediaType && s.mediaType !== undefined,
+      );
+    if (textOnly) {
+      const body = cleanCaption(detail.caption ?? "", 3500) || detail.displayName;
+      const link = detail.sources.find((s) => s.url)?.url;
+      await this.d.provider.sendText({
+        conversationId: target.conversationId,
+        text: link ? `${body}\n\n✈️ ${link}` : body,
+        quoteMessageId: target.quoteMessageId,
+      });
+      await this.d.log.record(logId, "links_only");
       return;
     }
 
     let status: Parameters<typeof formatLinksMessage>[2] = "not_attempted";
     let error: string | undefined;
     if (await this.d.settings.get("delivery.sendAttachment")) {
-      const r = await this.gate.run(() => this.tryAttachment(detail, target));
+      const caption = cleanCaption(detail.caption ?? "") || detail.displayName;
+      const r = await this.gate.run(() => this.tryAttachment(detail, target, caption));
       status = r.status;
       error = r.error;
     }
 
+    // When the file went through, it already carries its text; extra messages would only add noise.
+    if (status !== "sent") {
+      await this.d.provider.sendText({
+        conversationId: target.conversationId,
+        text: formatLinksMessage(detail, lang, status),
+        quoteMessageId: target.quoteMessageId,
+      });
+    }
     const hasLinks = detail.sources.some((s) => s.url);
-    await this.d.provider.sendText({
-      conversationId: target.conversationId,
-      text: formatLinksMessage(detail, lang, status),
-      quoteMessageId: target.quoteMessageId,
-    });
     await this.d.log.record(
-      resourceId,
+      logId,
       status === "sent" ? "file_sent" : hasLinks ? "links_only" : "unavailable",
       error,
     );
@@ -86,6 +121,7 @@ export class FileDeliverer implements Deliverer {
   private async tryAttachment(
     detail: ResourceDetail,
     target: DeliveryTarget,
+    caption: string,
   ): Promise<{
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
@@ -117,11 +153,14 @@ export class FileDeliverer implements Deliverer {
     const typeOk = usable.filter((c) => mimeAllowed(c.src.mimeType, allowed));
     if (typeOk.length === 0) return { status: "type_blocked" };
 
-    await this.d.provider.sendText({
-      conversationId: target.conversationId,
-      text: waitNotice(await this.d.settings.get("bot.language")),
-      quoteMessageId: target.quoteMessageId,
-    });
+    // Only slow transfers deserve a heads-up; for small files it is just noise.
+    if ((typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
+      await this.d.provider.sendText({
+        conversationId: target.conversationId,
+        text: waitNotice(await this.d.settings.get("bot.language")),
+        quoteMessageId: target.quoteMessageId,
+      });
+    }
 
     let lastError: string | undefined;
     for (const { src, fetcher } of typeOk.slice(0, 2)) {
@@ -135,6 +174,7 @@ export class FileDeliverer implements Deliverer {
           filePath: file.path,
           fileName: file.fileName,
           mimeType: file.mimeType,
+          caption,
           quoteMessageId: target.quoteMessageId,
         });
         if (res.confirmed) return { status: "sent" };

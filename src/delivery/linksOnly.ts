@@ -14,8 +14,15 @@ export class LinksOnlyDeliverer implements Deliverer {
   ) {}
 
   async deliver(resourceId: number, target: DeliveryTarget) {
+    await this.send(await this.library.detail(resourceId), target);
+  }
+
+  async deliverMessage(messageId: number, target: DeliveryTarget) {
+    await this.send(await this.library.messageDetail(messageId), target);
+  }
+
+  private async send(detail: Awaited<ReturnType<LibraryPort["detail"]>>, target: DeliveryTarget) {
     const lang = await this.settings.get("bot.language");
-    const detail = await this.library.detail(resourceId);
     const text = detail
       ? formatLinksMessage(detail, lang, "not_attempted")
       : t("unavailable", lang);

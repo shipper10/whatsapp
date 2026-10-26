@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import {
   academicNodes,
@@ -7,6 +7,8 @@ import {
   resources,
   telegramMessages,
 } from "../db/schema.js";
+import type { RawEntity } from "../telegram/types.js";
+import { cleanCaption } from "./indexView.js";
 import type { ResourceHit } from "./search.js";
 
 export interface NodeItem {
@@ -80,6 +82,8 @@ export interface ResourceSourceDetail {
   telegramChatId: bigint | null;
   telegramMessageId: number | null;
   driveFileId: string | null;
+  /** photo | document | video | audio | null (text-only message or Drive file). */
+  mediaType?: string | null;
 }
 
 export interface ResourceDetail {
@@ -87,6 +91,8 @@ export interface ResourceDetail {
   displayName: string;
   path: string[];
   sources: ResourceSourceDetail[];
+  /** The channel's own text for this file (sent with it as the caption). */
+  caption?: string | null;
 }
 
 /** Everything delivery needs: the source copies with their ids, sizes and verified links. */
@@ -121,6 +127,7 @@ export async function resourceDetail(db: Db, id: number): Promise<ResourceDetail
         telegramChatId: m?.chatId ?? null,
         telegramMessageId: m?.messageId ?? null,
         driveFileId: null,
+        mediaType: m?.mediaType ?? null,
       });
     } else {
       const [f] = await db.select().from(driveFiles).where(eq(driveFiles.id, s.sourceRecordId));
@@ -138,7 +145,146 @@ export async function resourceDetail(db: Db, id: number): Promise<ResourceDetail
       });
     }
   }
-  return { id: res.id, displayName: res.displayName, path, sources };
+  const tgText =
+    sources.find((x) => x.type === "telegram" && x.preferred) ??
+    sources.find((x) => x.type === "telegram");
+  let caption: string | null = null;
+  if (tgText?.telegramMessageId != null) {
+    const [m] = await db
+      .select({ text: telegramMessages.textOrCaption })
+      .from(telegramMessages)
+      .where(eq(telegramMessages.messageId, tgText.telegramMessageId))
+      .limit(1);
+    caption = m?.text ? cleanCaption(m.text) : null;
+  }
+  return { id: res.id, displayName: res.displayName, path, sources, caption };
+}
+
+/** A synced Telegram message as the index view sees it. */
+export interface IndexMessage {
+  messageId: number;
+  text: string;
+  entities: RawEntity[];
+  username: string | null;
+  isIndex: boolean;
+}
+
+const usernameOf = (permalink: string | null) =>
+  /t\.me\/([^/]+)\//.exec(permalink ?? "")?.[1] ?? null;
+
+export async function indexMessage(db: Db, messageId: number): Promise<IndexMessage | null> {
+  const [m] = await db
+    .select()
+    .from(telegramMessages)
+    .where(
+      and(eq(telegramMessages.messageId, messageId), eq(telegramMessages.syncStatus, "active")),
+    )
+    .limit(1);
+  if (!m) return null;
+  const meta = (m.entitiesJson ?? {}) as { entities?: RawEntity[]; isIndex?: boolean };
+  return {
+    messageId: m.messageId,
+    text: m.textOrCaption ?? "",
+    entities: meta.entities ?? [],
+    username: usernameOf(m.permalink),
+    isIndex: meta.isIndex ?? false,
+  };
+}
+
+/** The top of the index tree: the first navigation message that does not link back to another index. */
+export async function rootIndexId(db: Db): Promise<number | null> {
+  const [m] = await db
+    .select({ id: telegramMessages.messageId })
+    .from(telegramMessages)
+    .where(
+      and(
+        eq(telegramMessages.syncStatus, "active"),
+        sql`(${telegramMessages.entitiesJson}->>'isIndex')::boolean = true`,
+        sql`${telegramMessages.entitiesJson}->>'returnIndexId' is null`,
+      ),
+    )
+    .orderBy(asc(telegramMessages.messageId))
+    .limit(1);
+  return m?.id ?? null;
+}
+
+export type MessageKind = "index" | "file" | "text" | "missing";
+
+export async function messageKinds(db: Db, ids: number[]): Promise<Map<number, MessageKind>> {
+  const out = new Map<number, MessageKind>(ids.map((i) => [i, "missing"]));
+  if (ids.length === 0) return out;
+  const rows = await db
+    .select({
+      id: telegramMessages.messageId,
+      media: telegramMessages.mediaType,
+      meta: telegramMessages.entitiesJson,
+    })
+    .from(telegramMessages)
+    .where(
+      and(inArray(telegramMessages.messageId, ids), eq(telegramMessages.syncStatus, "active")),
+    );
+  for (const r of rows) {
+    const isIndex = ((r.meta ?? {}) as { isIndex?: boolean }).isIndex === true;
+    out.set(r.id, isIndex ? "index" : r.media ? "file" : "text");
+  }
+  return out;
+}
+
+const EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "video/mp4": "mp4",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "image/jpeg": "jpg",
+};
+
+/** Delivery details for any synced Telegram message, whether or not the classifier made a resource of it. */
+export async function telegramMessageDetail(
+  db: Db,
+  messageId: number,
+): Promise<ResourceDetail | null> {
+  const [m] = await db
+    .select()
+    .from(telegramMessages)
+    .where(
+      and(eq(telegramMessages.messageId, messageId), eq(telegramMessages.syncStatus, "active")),
+    )
+    .limit(1);
+  if (!m) return null;
+  const [rs] = await db
+    .select({ resourceId: resourceSources.resourceId })
+    .from(resourceSources)
+    .where(
+      and(eq(resourceSources.sourceType, "telegram"), eq(resourceSources.sourceRecordId, m.id)),
+    )
+    .limit(1);
+  const caption = m.textOrCaption ? cleanCaption(m.textOrCaption) : "";
+  const mime = m.mimeType ?? (m.mediaType === "photo" ? "image/jpeg" : null);
+  const fileName =
+    m.fileName ??
+    (m.mediaType ? `${m.mediaType}-${m.messageId}.${EXT[mime ?? ""] ?? "bin"}` : null);
+  const title = caption.split("\n").find((l) => l.trim()) ?? m.fileName ?? `#${m.messageId}`;
+  return {
+    id: rs?.resourceId ?? 0,
+    displayName: title.slice(0, 120),
+    path: [],
+    caption: m.textOrCaption ?? null,
+    sources: [
+      {
+        type: "telegram",
+        url: m.permalink,
+        preferred: true,
+        deliveryEligible: true,
+        fileName,
+        mimeType: mime,
+        sizeBytes: m.fileSizeBytes,
+        telegramChatId: m.chatId,
+        telegramMessageId: m.messageId,
+        driveFileId: null,
+        mediaType: m.mediaType,
+      },
+    ],
+  };
 }
 
 export interface NodeInfo extends NodeItem {

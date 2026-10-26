@@ -21,10 +21,14 @@ class FakeSource implements TelegramSource {
       this.failNext--;
       throw new Error("network");
     }
-    return this.msgs
-      .filter((m) => m.id > minId)
-      .sort((a, b) => a.id - b.id)
-      .slice(0, limit);
+    const top = Math.max(0, ...this.msgs.map((m) => m.id));
+    if (minId >= top) return { messages: [], lastId: minId, exhausted: true };
+    const to = Math.min(top, minId + limit);
+    return {
+      messages: this.msgs.filter((m) => m.id > minId && m.id <= to).sort((a, b) => a.id - b.id),
+      lastId: to,
+      exhausted: to >= top,
+    };
   }
 }
 
@@ -105,5 +109,13 @@ describe("syncTelegram", () => {
     expect(store.runs.at(-1)).toBe("error");
     const r = await syncTelegram(src, store, opts);
     expect(r.cursor).toBe(6);
+  });
+  it("is not stopped by deleted or service messages (gaps wider than a batch)", async () => {
+    // ids 4..20 do not exist (deleted/pins); the real content continues after the gap
+    const src = new FakeSource([mk(1), mk(2), mk(3), mk(21), mk(22), mk(30)]);
+    const store = new MemStore();
+    const r = await syncTelegram(src, store, opts); // batchSize 3
+    expect([...store.rows.keys()].sort((a, b) => a - b)).toEqual([1, 2, 3, 21, 22, 30]);
+    expect(r.cursor).toBe(30);
   });
 });

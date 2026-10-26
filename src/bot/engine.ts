@@ -1,5 +1,7 @@
 import { normalizeText } from "../core/normalize/arabic.js";
+import { chunkText, renderIndex } from "../library/indexView.js";
 import { clip, t } from "./messages.js";
+import { parseSelection, resolveTyped, type Selection } from "./selection.js";
 import type { BotConfig, Item, LibraryPort, SessionState, Turn, View } from "./types.js";
 
 const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
@@ -14,7 +16,7 @@ export const emptyState = (): SessionState => ({
 
 type Command =
   | { kind: "home" | "back" | "next" | "prev" }
-  | { kind: "number"; n: number }
+  | { kind: "select"; sel: Selection }
   | { kind: "text"; text: string };
 
 const WORDS: Record<string, "home" | "back" | "next" | "prev"> = {
@@ -46,10 +48,11 @@ export function parseInput(raw: string): Command {
     .replace(/\s+/g, " ");
   if (s === "-" || s === "<") return { kind: s === "-" ? "back" : "prev" };
   if (s === "+" || s === ">") return { kind: "next" };
-  if (/^\d{1,3}$/.test(s))
-    return Number(s) === 0 ? { kind: "home" } : { kind: "number", n: Number(s) };
+  if (s === "0") return { kind: "home" };
   const w = WORDS[normalizeText(s)];
   if (w) return { kind: w };
+  const sel = parseSelection(s);
+  if (sel) return { kind: "select", sel };
   return { kind: "text", text: s };
 }
 
@@ -85,13 +88,45 @@ async function homeItems(lib: LibraryPort, cfg: BotConfig): Promise<Item[]> {
   return items;
 }
 
-async function renderView(
+interface Rendered {
+  texts: string[];
+  items: Item[];
+  hasNext: boolean;
+}
+
+/** Shows one of the channel's own index messages with numbered links. */
+async function renderIndexView(
   lib: LibraryPort,
   cfg: BotConfig,
-  view: View,
-): Promise<{ text: string; items: Item[]; hasNext: boolean }> {
+  messageId: number,
+  header?: string,
+): Promise<Rendered> {
+  const msg = await lib.indexMessage(messageId);
+  if (!msg) return { texts: [t("indexMissing", cfg.lang)], items: [], hasNext: false };
+  const r = renderIndex(msg);
+  const items: Item[] = r.entries.map((e) => ({
+    kind: "link",
+    id: e.targetId,
+    label: e.label,
+    linkKind: e.kind,
+    ord: e.ord,
+    block: e.block,
+  }));
+  const body = header ? `${header}\n\n${r.text}` : r.text;
+  const texts = chunkText(body);
+  texts[texts.length - 1] = `${texts[texts.length - 1]}\n\n${t("indexFooter", cfg.lang)}`;
+  return { texts, items, hasNext: false };
+}
+
+async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise<Rendered> {
   const size = cfg.pageSize;
+  if (view.type === "index") return renderIndexView(lib, cfg, view.messageId);
   if (view.type === "home") {
+    const root = cfg.rootIndexId || (await lib.rootIndexId());
+    if (root) {
+      const idx = await renderIndexView(lib, cfg, root, `${cfg.welcome}\n📚 ${cfg.cohort}`);
+      if (idx.items.length > 0) return idx;
+    }
     const items = await homeItems(lib, cfg);
     const text = [cfg.welcome, "", `📚 ${cfg.cohort}`, ""]
       .concat(
@@ -101,7 +136,7 @@ async function renderView(
       )
       .concat(["", "──────────", t("searchHint", cfg.lang)])
       .join("\n");
-    return { text, items, hasNext: false };
+    return { texts: [text], items, hasNext: false };
   }
 
   if (view.type === "node") {
@@ -126,7 +161,7 @@ async function renderView(
     }
     const title = `📂 ${clip((info?.path ?? []).slice(-2).join(" › ") || "…", 100)}`;
     return {
-      text: renderList(title, items, hasNext, view.page, cfg, t("searchHint", cfg.lang)),
+      texts: [renderList(title, items, hasNext, view.page, cfg, t("searchHint", cfg.lang))],
       items,
       hasNext,
     };
@@ -141,19 +176,23 @@ async function renderView(
     const items = shown.map((r): Item => ({ kind: "resource", id: r.id, label: r.displayName }));
     if (items.length === 0 && view.page === 1) {
       return {
-        text: `${t("searchTitle", cfg.lang)} «${clip(view.query, 40)}»\n\n${t("noResults", cfg.lang)}`,
+        texts: [
+          `${t("searchTitle", cfg.lang)} «${clip(view.query, 40)}»\n\n${t("noResults", cfg.lang)}`,
+        ],
         items,
         hasNext: false,
       };
     }
     return {
-      text: renderList(
-        `${t("searchTitle", cfg.lang)} «${clip(view.query, 40)}»`,
-        items,
-        hasNext,
-        view.page,
-        cfg,
-      ),
+      texts: [
+        renderList(
+          `${t("searchTitle", cfg.lang)} «${clip(view.query, 40)}»`,
+          items,
+          hasNext,
+          view.page,
+          cfg,
+        ),
+      ],
       items,
       hasNext,
     };
@@ -166,13 +205,14 @@ async function renderView(
     .map((r): Item => ({ kind: "resource", id: r.id, label: r.displayName }));
   const hasNext = res.length > size && offset + size < cfg.maxResults * 3;
   return {
-    text: renderList(t("recent", cfg.lang), items, hasNext, view.page, cfg),
+    texts: [renderList(t("recent", cfg.lang), items, hasNext, view.page, cfg)],
     items,
     hasNext,
   };
 }
 
-const pagedView = (v: View, page: number): View => (v.type === "home" ? v : { ...v, page });
+const pagedView = (v: View, page: number): View =>
+  v.type === "home" || v.type === "index" ? v : { ...v, page };
 
 /** One conversation turn. Pure with respect to I/O except for the library reads; the caller persists state. */
 export async function step(
@@ -191,7 +231,7 @@ export async function step(
     const r = await renderView(lib, cfg, v);
     return {
       state: { view: v, items: r.items, hasNext: r.hasNext, stack: st.slice(-MAX_STACK) },
-      replies: [prefix ? `${prefix}\n\n${r.text}` : r.text],
+      replies: prefix ? [`${prefix}\n\n${r.texts[0]}`, ...r.texts.slice(1)] : r.texts,
     };
   };
 
@@ -207,7 +247,7 @@ export async function step(
     }
     case "next":
     case "prev": {
-      if (view.type === "home") return show(view, stack);
+      if (view.type === "home" || view.type === "index") return show(view, stack);
       const page = cmd.kind === "next" ? view.page + 1 : view.page - 1;
       if ((cmd.kind === "next" && !state.hasNext) || page < 1) {
         prefix = t("noMore", cfg.lang);
@@ -215,16 +255,91 @@ export async function step(
       }
       return show(pagedView(view, page), stack);
     }
-    case "number": {
-      const item = state.items[cmd.n - 1];
-      if (!item) {
-        prefix = t("invalid", cfg.lang);
+    case "select": {
+      let picks: Item[];
+      if (cmd.sel.kind === "typed") {
+        if (view.type !== "index" && view.type !== "home") {
+          // "sheet 3" outside an index is just a search phrase
+          stack = view.type === "search" ? stack : [...stack, view];
+          return show({ type: "search", query: input.trim().slice(0, 100), page: 1 }, stack);
+        }
+        const hits = resolveTyped(
+          state.items.flatMap((it, i) =>
+            it.kind === "link"
+              ? [
+                  {
+                    n: i + 1,
+                    targetId: it.id,
+                    label: it.label,
+                    kind: it.linkKind,
+                    ord: it.ord,
+                    block: it.block,
+                  },
+                ]
+              : [],
+          ),
+          cmd.sel,
+        );
+        picks = hits.map((h) => state.items[h.n - 1]).filter((x): x is Item => !!x);
+        if (picks.length === 0) {
+          prefix = t("noTyped", cfg.lang);
+          return show(view, stack);
+        }
+      } else {
+        picks = cmd.sel.nums.map((n) => state.items[n - 1]).filter((x): x is Item => !!x);
+        if (picks.length === 0) {
+          prefix = t("invalid", cfg.lang);
+          return show(view, stack);
+        }
+      }
+
+      if (picks.length === 1) {
+        const item = picks[0] as Item;
+        if (item.kind === "node")
+          return show({ type: "node", nodeId: item.id, page: 1 }, [...stack, view]);
+        if (item.kind === "action") return show({ type: "recent", page: 1 }, [...stack, view]);
+      }
+
+      const linkIds = picks.flatMap((p) => (p.kind === "link" ? [p.id] : []));
+      const kinds = await lib.messageKinds(linkIds);
+      if (picks.length === 1 && picks[0]?.kind === "link" && kinds.get(picks[0].id) === "index")
+        return show({ type: "index", messageId: picks[0].id }, [...stack, view]);
+
+      const resources: number[] = [];
+      const messages: number[] = [];
+      const missing: number[] = [];
+      let skippedNav = false;
+      for (const p of picks) {
+        if (p.kind === "resource") resources.push(p.id);
+        else if (p.kind === "link") {
+          const k = kinds.get(p.id);
+          if (k === "file" || k === "text") messages.push(p.id);
+          else if (k === "index") skippedNav = true;
+          else missing.push(p.id);
+        } else skippedNav = true;
+      }
+      const notes: string[] = [];
+      let total = resources.length + messages.length;
+      if (total > cfg.maxBatch) {
+        notes.push(t("capped", cfg.lang).replace("{n}", String(cfg.maxBatch)));
+        const keepMsgs = Math.max(0, cfg.maxBatch - resources.length);
+        resources.splice(cfg.maxBatch);
+        messages.splice(keepMsgs);
+        total = resources.length + messages.length;
+      }
+      if (skippedNav) notes.push(t("navSkipped", cfg.lang));
+      if (missing.length > 0)
+        notes.push(`${t("notSynced", cfg.lang)} ${missing.map((m) => `#${m}`).join(" ")}`);
+      if (total === 0) {
+        prefix = notes.join("\n") || t("invalid", cfg.lang);
         return show(view, stack);
       }
-      if (item.kind === "node")
-        return show({ type: "node", nodeId: item.id, page: 1 }, [...stack, view]);
-      if (item.kind === "action") return show({ type: "recent", page: 1 }, [...stack, view]);
-      return { state, replies: [], deliver: item.id };
+      if (total > 1) notes.push(t("sendingMany", cfg.lang).replace("{n}", String(total)));
+      return {
+        state,
+        replies: notes.length ? [notes.join("\n")] : [],
+        deliver: { resources, messages },
+      };
     }
     case "text": {
       const query = cmd.text.slice(0, 100);
