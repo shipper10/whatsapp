@@ -96,7 +96,16 @@ export class FileDeliverer implements Deliverer {
     let status: Parameters<typeof formatLinksMessage>[2] = "not_attempted";
     let error: string | undefined;
     if (await this.d.settings.get("delivery.sendAttachment")) {
-      const caption = cleanCaption(detail.caption ?? "") || detail.displayName;
+      const driveUrls = [
+        ...new Set(
+          detail.sources.filter((x) => x.type === "google_drive" && x.url).map((x) => x.url),
+        ),
+      ];
+      const base = cleanCaption(detail.caption ?? "", 800) || detail.displayName;
+      // A sent file gets no follow-up links message, so its Drive copy is listed in the caption.
+      const caption = driveUrls.length
+        ? `${base}\n\n☁️ Google Drive: ${driveUrls.join("\n")}`
+        : base;
       const r = await this.gate.run(() => this.tryAttachment(detail, target, caption));
       status = r.status;
       error = r.error;

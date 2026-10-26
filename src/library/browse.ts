@@ -8,6 +8,7 @@ import {
   telegramMessages,
 } from "../db/schema.js";
 import type { RawEntity } from "../telegram/types.js";
+import { type IndexTitle, indexTitle } from "./indexSearch.js";
 import { cleanCaption } from "./indexView.js";
 import type { ResourceHit } from "./search.js";
 
@@ -95,20 +96,12 @@ export interface ResourceDetail {
   caption?: string | null;
 }
 
-/** Everything delivery needs: the source copies with their ids, sizes and verified links. */
-export async function resourceDetail(db: Db, id: number): Promise<ResourceDetail | null> {
-  const [res] = await db.select().from(resources).where(eq(resources.id, id));
-  if (!res || !res.isActive) return null;
-
-  const path: string[] = [];
-  for (let nid = res.academicNodeId; nid; ) {
-    const [n] = await db.select().from(academicNodes).where(eq(academicNodes.id, nid));
-    if (!n) break;
-    path.unshift(n.name);
-    nid = n.parentId;
-  }
-
-  const rows = await db.select().from(resourceSources).where(eq(resourceSources.resourceId, id));
+/** Every stored copy (Telegram and Drive) of a resource, with verified ids, sizes and links. */
+async function loadSources(db: Db, resourceId: number): Promise<ResourceSourceDetail[]> {
+  const rows = await db
+    .select()
+    .from(resourceSources)
+    .where(eq(resourceSources.resourceId, resourceId));
   const sources: ResourceSourceDetail[] = [];
   for (const s of rows) {
     if (s.sourceType === "telegram") {
@@ -145,6 +138,23 @@ export async function resourceDetail(db: Db, id: number): Promise<ResourceDetail
       });
     }
   }
+  return sources;
+}
+
+/** Everything delivery needs: the source copies with their ids, sizes and verified links. */
+export async function resourceDetail(db: Db, id: number): Promise<ResourceDetail | null> {
+  const [res] = await db.select().from(resources).where(eq(resources.id, id));
+  if (!res || !res.isActive) return null;
+
+  const path: string[] = [];
+  for (let nid = res.academicNodeId; nid; ) {
+    const [n] = await db.select().from(academicNodes).where(eq(academicNodes.id, nid));
+    if (!n) break;
+    path.unshift(n.name);
+    nid = n.parentId;
+  }
+
+  const sources = await loadSources(db, id);
   const tgText =
     sources.find((x) => x.type === "telegram" && x.preferred) ??
     sources.find((x) => x.type === "telegram");
@@ -208,6 +218,21 @@ export async function rootIndexId(db: Db): Promise<number | null> {
   return m?.id ?? null;
 }
 
+/** Titles of every synced index message (the channel's own tree of subjects/semesters/years). */
+export async function indexTitles(db: Db): Promise<IndexTitle[]> {
+  const rows = await db
+    .select({ id: telegramMessages.messageId, text: telegramMessages.textOrCaption })
+    .from(telegramMessages)
+    .where(
+      and(
+        eq(telegramMessages.syncStatus, "active"),
+        sql`(${telegramMessages.entitiesJson}->>'isIndex')::boolean = true`,
+      ),
+    )
+    .orderBy(asc(telegramMessages.messageId));
+  return rows.map((r) => ({ messageId: r.id, title: indexTitle(r.text ?? "") }));
+}
+
 export type MessageKind = "index" | "file" | "text" | "missing";
 
 export async function messageKinds(db: Db, ids: number[]): Promise<Map<number, MessageKind>> {
@@ -264,6 +289,10 @@ export async function telegramMessageDetail(
     m.fileName ??
     (m.mediaType ? `${m.mediaType}-${m.messageId}.${EXT[mime ?? ""] ?? "bin"}` : null);
   const title = caption.split("\n").find((l) => l.trim()) ?? m.fileName ?? `#${m.messageId}`;
+  // Drive copies live on the resource this message was merged into; they must not be lost on this path.
+  const driveCopies = rs
+    ? (await loadSources(db, rs.resourceId)).filter((x) => x.type === "google_drive")
+    : [];
   return {
     id: rs?.resourceId ?? 0,
     displayName: title.slice(0, 120),
@@ -283,6 +312,7 @@ export async function telegramMessageDetail(
         driveFileId: null,
         mediaType: m.mediaType,
       },
+      ...driveCopies,
     ],
   };
 }

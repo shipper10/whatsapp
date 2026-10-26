@@ -83,8 +83,6 @@ export class BaileysProvider implements WhatsAppProvider {
   /** Recent inbound messages, kept only so replies can quote the asker. */
   private recent = new Map<string, WAMessage>();
   private sendChain: Promise<unknown> = Promise.resolve();
-  /** Ids of messages this bot sent recently (to recognise replies addressed to it). */
-  private ownIds = new Set<string>();
   private lastSendAt = 0;
   private authClear: (() => Promise<void>) | null = null;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -152,11 +150,8 @@ export class BaileysProvider implements WhatsAppProvider {
     sock.ev.on("messages.upsert", ((e: { messages: WAMessage[]; type: string }) => {
       if (e.type !== "notify") return; // history / appended messages are not requests
       for (const m of e.messages) {
-        const extracted = extractIncoming(m);
-        if (!extracted) continue;
-        const { replyToParticipant, ...incoming } = extracted;
-        if (replyToParticipant)
-          incoming.replyToFromMe = this.isMe(replyToParticipant, state.creds.me);
+        const incoming = extractIncoming(m);
+        if (!incoming) continue;
         this.remember(m);
         void this.deps
           .onMessage(incoming.messageId, incoming)
@@ -229,16 +224,6 @@ export class BaileysProvider implements WhatsAppProvider {
       getMessage: async () => undefined,
     }) as unknown as SocketLike;
   };
-
-  /** Compares account ids ignoring the device suffix (`123:5@s.whatsapp.net` == `123@s.whatsapp.net`). */
-  private isMe(jid: string, me: { id?: string; lid?: string } | undefined): boolean {
-    const user = (x: string) => x.split("@")[0]?.split(":")[0];
-    return [me?.id, me?.lid].some((x) => x && user(x) === user(jid));
-  }
-
-  isOwnMessage(messageId: string): boolean {
-    return this.ownIds.has(messageId);
-  }
 
   private remember(m: WAMessage): void {
     const id = m.key.id;

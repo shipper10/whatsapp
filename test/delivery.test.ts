@@ -56,6 +56,7 @@ const lib = (d: ResourceDetail | null): LibraryPort => ({
   detail: async () => d,
   indexMessage: async () => null,
   rootIndexId: async () => null,
+  findIndexes: async () => [],
   messageKinds: async () => new Map(),
   messageDetail: async () => d,
 });
@@ -124,7 +125,9 @@ describe("FileDeliverer", () => {
     await deliverer.deliver(1, target);
     expect(provider.docs).toHaveLength(1);
     expect(provider.docs[0]?.fileName).toBe("Sheet 7.pdf");
-    expect(provider.docs[0]?.caption).toBe("Sheet 7");
+    expect(provider.docs[0]?.caption).toBe(
+      "Sheet 7\n\n☁️ Google Drive: https://drive.google.com/file/d/d1/view",
+    );
     expect(provider.sent).toHaveLength(0); // the file carries its text; no separate links message
     expect(records).toEqual([{ outcome: "file_sent", error: undefined }]);
     expect(readdirSync(tempDir)).toEqual([]);
@@ -244,6 +247,17 @@ describe("FileDeliverer", () => {
     await deliverer.deliver(1, { conversationId: "g@g.us", quoteMessageId: "Q9" });
     expect(provider.docs[0]?.quoteMessageId).toBe("Q9");
     expect(provider.sent.every((s) => s.quoteMessageId === "Q9")).toBe(true);
+  });
+
+  it("puts the Drive link in the caption of a sent file (no follow-up links message)", async () => {
+    const f = new FakeFetcher("telegram");
+    const { provider, deliverer } = await setup({ ...detail([tg, drv]), caption: "📔 Sheet 7" }, [
+      f,
+    ]);
+    await deliverer.deliverMessage(59, target);
+    expect(provider.docs[0]?.caption).toContain("📔 Sheet 7");
+    expect(provider.docs[0]?.caption).toContain("https://drive.google.com/file/d/d1/view");
+    expect(provider.sent).toHaveLength(0);
   });
 
   it("uses the Telegram text (without navigation lines or hashtags) as the caption", async () => {

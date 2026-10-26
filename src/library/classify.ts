@@ -358,6 +358,12 @@ export function planLibrary(input: PlanInput): LibraryPlan {
     driveByName.set(normalizeText(d.name), [...(driveByName.get(normalizeText(d.name)) ?? []), d]);
 
   const claimed = new Set<number>();
+  const leftovers: {
+    d: DriveRow;
+    candidates: { res: PlanResource; row: TgRow }[];
+    sameDrive: DriveRow[];
+    driveSource: PlanResourceSource;
+  }[] = [];
   for (const d of input.drive) {
     const k = normalizeText(d.name);
     const tgC = tgByName.get(k) ?? [];
@@ -383,6 +389,40 @@ export function planLibrary(input: PlanInput): LibraryPlan {
       candidates[0].res.searchText = normalizeText(
         `${candidates[0].res.searchText} ${d.folderPath ?? ""}`,
       );
+      continue;
+    }
+
+    leftovers.push({ d, candidates, sameDrive, driveSource });
+  }
+
+  // 4b. Same file under a different name: identical size and extension, unique on both sides.
+  const ext = (n: string) => /\.([a-z0-9]{1,6})$/i.exec(n)?.[1]?.toLowerCase() ?? "";
+  const sizeKey = (size: number | null, name: string) =>
+    size && size > 0 ? `${size}:${ext(name)}` : null;
+  const tgBySize = new Map<string, { res: PlanResource; row: TgRow }[]>();
+  for (const t of tgResources) {
+    const k = sizeKey(t.row.fileSizeBytes, t.row.fileName ?? "");
+    if (k && !claimed.has(t.row.dbId)) tgBySize.set(k, [...(tgBySize.get(k) ?? []), t]);
+  }
+  const driveBySize = new Map<string, number>();
+  for (const l of leftovers) {
+    const k = sizeKey(l.d.sizeBytes, l.d.name);
+    if (k) driveBySize.set(k, (driveBySize.get(k) ?? 0) + 1);
+  }
+
+  for (const { d, candidates, sameDrive, driveSource } of leftovers) {
+    const k = sizeKey(d.sizeBytes, d.name);
+    const match = k ? (tgBySize.get(k) ?? []) : [];
+    if (
+      k &&
+      match.length === 1 &&
+      driveBySize.get(k) === 1 &&
+      match[0] &&
+      !claimed.has(match[0].row.dbId)
+    ) {
+      claimed.add(match[0].row.dbId);
+      match[0].res.sources.push(driveSource);
+      match[0].res.searchText = normalizeText(`${match[0].res.searchText} ${d.folderPath ?? ""}`);
       continue;
     }
 

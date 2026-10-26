@@ -5,8 +5,9 @@ import type { SessionStore } from "../core/session/store.js";
 import type { Deliverer } from "../delivery/types.js";
 import type { IncomingMessage, WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
-import { step } from "./engine.js";
+import { parseInput, step } from "./engine.js";
 import { t } from "./messages.js";
+import type { ReplyTracker } from "./replyTracker.js";
 import type { BotConfig, LibraryPort } from "./types.js";
 
 export interface HandlerDeps {
@@ -22,6 +23,8 @@ export interface HandlerDeps {
   };
   /** Optional hook for admin commands; return true when the message was consumed. */
   adminHook?: (msg: IncomingMessage) => Promise<boolean>;
+  /** Knows who each bot message in a group answered; `provider` must be the one wrapped by it. */
+  replies: ReplyTracker;
   now?: () => number;
 }
 
@@ -56,21 +59,12 @@ export function createHandler(deps: HandlerDeps) {
   const dedupe = new Deduper();
   const nowMs = deps.now ?? Date.now;
 
-  /** Ids of messages this handler sent, so replies to them count as addressed to the bot. */
-  const sentIds = new Set<string>();
-  const rememberSent = (id?: string) => {
-    if (!id) return;
-    sentIds.add(id);
-    if (sentIds.size > 1000) sentIds.delete(sentIds.values().next().value as string);
-  };
-
   async function reply(msg: IncomingMessage, text: string) {
     const res = await deps.provider.sendText({
       conversationId: msg.conversationId,
       text,
       quoteMessageId: msg.isGroup ? msg.messageId : undefined,
     });
-    rememberSent(res.providerMessageId);
     if (!res.confirmed)
       deps.logger.warn(
         { error: res.error, conversation: msg.conversationId },
@@ -92,6 +86,7 @@ export function createHandler(deps: HandlerDeps) {
       rate,
       rootIndexId,
       maxBatch,
+      aliases,
     ] = await Promise.all([
       deps.settings.get("bot.language"),
       deps.settings.get("search.pageSize"),
@@ -105,8 +100,18 @@ export function createHandler(deps: HandlerDeps) {
       deps.settings.get("rateLimit.perParticipantPerMinute"),
       deps.settings.get("library.rootIndexMessageId"),
       deps.settings.get("delivery.maxBatch"),
+      deps.settings.get("library.indexAliases"),
     ]);
-    const cfg: BotConfig = { pageSize, maxResults, welcome, cohort, lang, rootIndexId, maxBatch };
+    const cfg: BotConfig = {
+      pageSize,
+      maxResults,
+      welcome,
+      cohort,
+      lang,
+      rootIndexId,
+      maxBatch,
+      aliases,
+    };
 
     if (msg.isGroup && groupMode === "disabled") return;
 
@@ -130,15 +135,16 @@ export function createHandler(deps: HandlerDeps) {
       let text = msg.text;
 
       if (msg.isGroup) {
-        // In a group the bot speaks only when addressed: by the prefix, or by replying to one of its messages.
+        // In a group the bot speaks only when addressed: by the prefix, or when the person who asked
+        // replies to the bot's answer with a navigation command (a number, 0, back, next...).
+        deps.replies.noteIncoming(msg.messageId, msg.participantId);
         const stripped = stripTrigger(msg.text, triggers);
-        const repliedToBot =
-          msg.replyToFromMe === true ||
-          (msg.replyToMessageId !== undefined &&
-            (sentIds.has(msg.replyToMessageId) ||
-              deps.provider.isOwnMessage?.(msg.replyToMessageId) === true));
-        if (stripped === null && !repliedToBot) return;
-        if (stripped !== null) text = stripped === "" ? "0" : stripped;
+        if (stripped === null) {
+          const answeredThem =
+            msg.replyToMessageId !== undefined &&
+            deps.replies.askerOf(msg.replyToMessageId) === msg.participantId;
+          if (!answeredThem || parseInput(msg.text).kind === "text") return;
+        } else text = stripped === "" ? "0" : stripped;
         if (groupReply === "private_only") {
           if (stripped !== null) await reply(msg, t("groupPrivateOnly", lang));
           return;

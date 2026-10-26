@@ -4,15 +4,15 @@ type Lang = BotConfig["lang"];
 
 const M = {
   searchHint: {
-    ar: "✍️ اكتب اسم الملف أو المادة للبحث",
-    en: "✍️ Type a file or subject name to search",
+    ar: "اكتب اسم مادة للانتقال لفهرسها، أو [ ؟ كلمة ] للبحث عن ملف",
+    en: "Type a subject name to jump to its index, or [ ? word ] to search files",
   },
   footerNav: {
-    ar: "🏠 0 الرئيسية  •  ↩️ رجوع",
-    en: "🏠 0 Home  •  ↩️ back",
+    ar: "[ 0 ] الرئيسية   [ - ] رجوع",
+    en: "[ 0 ] Home   [ - ] Back",
   },
-  next: { ar: "➡️ + التالي", en: "➡️ + next" },
-  prev: { ar: "⬅️ - السابق", en: "⬅️ prev" },
+  next: { ar: "[ + ] التالي", en: "[ + ] Next" },
+  prev: { ar: "[ < ] السابق", en: "[ < ] Previous" },
   recent: { ar: "🆕 أحدث الإضافات", en: "🆕 Recently added" },
   searchTitle: { ar: "🔎 نتائج البحث عن", en: "🔎 Results for" },
   empty: { ar: "لا يوجد محتوى هنا بعد.", en: "Nothing here yet." },
@@ -25,9 +25,10 @@ const M = {
     en: "Invalid choice. Send a number from the list, or 0 for home.",
   },
   indexFooter: {
-    ar: "✍️ أرسل رقم 【】 للفتح أو الإرسال: *5* أو *1-5* أو *3,7,9*\n📦 بالنوع: *شيت 1-5* • *محاضرة 2-4* • *كل الشيتات*\n🏠 0 الرئيسية  •  ↩️ رجوع  •  أو اكتب كلمة للبحث",
-    en: "✍️ Send a 【】 number to open/send: *5*, *1-5* or *3,7,9*\n📦 By type: *sheet 1-5* • *lecture 2-4* • *all sheets*\n🏠 0 Home  •  ↩️ back  •  or type a word to search",
+    ar: "──────────\nالأوامر:\n• إرسال ملف أو أكثر برقمه 【】:   5   |   1-5   |   3,7,9\n• بالنوع:   شيت 1-5   |   محاضرة 2-4   |   كل الشيتات\n• الانتقال لفهرس مادة:   كيمياء   |   الفصل الثاني\n• [ 0 ] الرئيسية    [ - ] رجوع    [ ؟ كلمة ] بحث في الملفات",
+    en: "──────────\nCommands:\n• Send files by their 【】 number:   5   |   1-5   |   3,7,9\n• By type:   sheet 1-5   |   lecture 2-4   |   all sheets\n• Jump to a subject index:   chemistry   |   2nd semester\n• [ 0 ] Home    [ - ] Back    [ ? word ] Search files",
   },
+  indexesTitle: { ar: "الفهارس المطابقة لـ", en: "Indexes matching" },
   indexMissing: {
     ar: "هذا الفهرس غير متاح بعد (لم تتم مزامنته). اكتب 0 للرئيسية.",
     en: "This index isn't available yet (not synced). Send 0 for home.",

@@ -1,4 +1,5 @@
 import { createHandler } from "../../src/bot/handler.js";
+import { ReplyTracker } from "../../src/bot/replyTracker.js";
 import { DbSessionStore } from "../../src/core/session/store.js";
 import type { Db } from "../../src/db/client.js";
 import { LinksOnlyDeliverer } from "../../src/delivery/linksOnly.js";
@@ -78,13 +79,16 @@ export async function makeBot(opts: { env?: NodeJS.ProcessEnv; now?: () => numbe
     warn: (_: object, m?: string) => void logs.push(m ?? ""),
     error: (o: object, m?: string) => void logs.push(`${m ?? ""} ${JSON.stringify(o)}`),
   };
+  const replies = new ReplyTracker();
+  const tracked = replies.wrap(provider);
   const make = () =>
     createHandler({
-      provider,
+      replies,
+      provider: tracked,
       settings,
       sessions,
       library,
-      deliverer: new LinksOnlyDeliverer(library, provider, settings),
+      deliverer: new LinksOnlyDeliverer(library, tracked, settings),
       logger,
       now: nowMs,
     });

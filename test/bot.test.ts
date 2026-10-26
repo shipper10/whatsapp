@@ -67,6 +67,25 @@ describe("private chat", () => {
     expect(await run("٠")).toContain("Main Index");
   });
 
+  it("typing a subject or semester name (Arabic or English) jumps straight to its index", async () => {
+    const { run } = await session(A);
+    expect(await run("كيمياء")).toContain("Chemistry Index");
+    expect(await run("الفصل الثاني")).toContain("Biomolecules");
+    expect(await run("chemistry")).toContain("Chemistry Index");
+    const back = await run("-");
+    expect(back).toContain("Biomolecules"); // [ - ] goes back to the previous screen
+    expect(await run("؟ chemistry sheet")).toContain("🔎"); // forced file search
+  });
+
+  it("the help footer uses plain punctuation, not emoji, for navigation", async () => {
+    const { run } = await session(B);
+    const home = await run("0");
+    expect(home).toContain("[ 0 ] الرئيسية");
+    expect(home).toContain("[ - ] رجوع");
+    expect(home).not.toContain("↩️");
+    expect(home).not.toContain("🏠");
+  });
+
   it("semester 2 is browsable too", async () => {
     const { run } = await session(B);
     await run("0");
@@ -109,7 +128,7 @@ describe("private chat", () => {
     const res = await run("chemistry sheet");
     expect(res).toContain("🔎");
     expect(res).toContain("1. 📄");
-    expect(res).toContain("+ التالي");
+    expect(res).toContain("[ + ] التالي");
     expect(await run("zzqq nothing")).toContain("لم أجد نتائج");
     expect(await run("99")).toContain("اختيار غير صحيح");
   });
@@ -170,17 +189,20 @@ describe("groups: addressed only by prefix or by replying to the bot", () => {
     const viaPrefix = await say(A, "!1");
     expect(viaPrefix.map((x) => x.text).join("\n")).toContain("Cell Biology");
 
-    // replying to the bot's own message continues the conversation without the prefix
+    // the person who asked can continue by replying to the bot's answer, with a navigation command
     const botMsgId = bot.provider.lastId();
     const viaReply = await say(A, "0", { replyToMessageId: botMsgId });
     expect(viaReply.map((x) => x.text).join("\n")).toContain("Main Index");
 
-    // replying to somebody else's message is not addressed to the bot
+    // ...but not with free text (that would be a search the person never asked for)
+    const again = bot.provider.lastId();
+    expect(await say(A, "كيمياء", { replyToMessageId: again })).toHaveLength(0);
+
+    // someone else replying to A's answer is not addressed to the bot
+    expect(await say(B, "0", { replyToMessageId: again })).toHaveLength(0);
+    expect(await say(B, "1", { replyToMessageId: again })).toHaveLength(0);
+    // replying to a message that is not the bot's is not addressed to it either
     expect(await say(A, "0", { replyToMessageId: "someone-else" })).toHaveLength(0);
-    // the provider can also say the quoted message was the bot's (survives restarts)
-    expect(
-      (await say(A, "0", { replyToMessageId: "old", replyToFromMe: true })).length,
-    ).toBeGreaterThan(0);
   });
 
   it("keeps each member's menu separate", async () => {

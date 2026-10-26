@@ -1,5 +1,5 @@
 import { normalizeText } from "../core/normalize/arabic.js";
-import { chunkText, renderIndex } from "../library/indexView.js";
+import { chunkText, marker, renderIndex } from "../library/indexView.js";
 import { clip, t } from "./messages.js";
 import { parseSelection, resolveTyped, type Selection } from "./selection.js";
 import type { BotConfig, Item, LibraryPort, SessionState, Turn, View } from "./types.js";
@@ -121,6 +121,26 @@ async function renderIndexView(
 async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise<Rendered> {
   const size = cfg.pageSize;
   if (view.type === "index") return renderIndexView(lib, cfg, view.messageId);
+  if (view.type === "indexes") {
+    const found = await lib.findIndexes(view.query, cfg.aliases, 10);
+    const items: Item[] = found.map((f) => ({
+      kind: "link",
+      id: f.messageId,
+      label: f.title,
+      linkKind: "other",
+      ord: null,
+      block: 1,
+    }));
+    const lines = found.map((f, i) => `${marker(i + 1)} ${clip(f.title, 80)}`);
+    const text = [
+      `${t("indexesTitle", cfg.lang)} «${clip(view.query, 40)}»`,
+      "",
+      ...lines,
+      "",
+      t("footerNav", cfg.lang),
+    ].join("\n");
+    return { texts: [text], items, hasNext: false };
+  }
   if (view.type === "home") {
     const root = cfg.rootIndexId || (await lib.rootIndexId());
     if (root) {
@@ -212,7 +232,7 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
 }
 
 const pagedView = (v: View, page: number): View =>
-  v.type === "home" || v.type === "index" ? v : { ...v, page };
+  v.type === "home" || v.type === "index" || v.type === "indexes" ? v : { ...v, page };
 
 /** One conversation turn. Pure with respect to I/O except for the library reads; the caller persists state. */
 export async function step(
@@ -247,7 +267,8 @@ export async function step(
     }
     case "next":
     case "prev": {
-      if (view.type === "home" || view.type === "index") return show(view, stack);
+      if (view.type === "home" || view.type === "index" || view.type === "indexes")
+        return show(view, stack);
       const page = cmd.kind === "next" ? view.page + 1 : view.page - 1;
       if ((cmd.kind === "next" && !state.hasNext) || page < 1) {
         prefix = t("noMore", cfg.lang);
@@ -347,8 +368,25 @@ export async function step(
         prefix = t("invalid", cfg.lang);
         return show(view, stack);
       }
+      // "? word" forces a file search; anything else first tries to jump straight to a matching index.
+      const forced = /^\s*(?:[?؟]|بحث\s|search\s)\s*(.*)$/i.exec(query);
+      const q = (forced ? (forced[1] ?? "") : query).trim();
+      if (forced && normalizeText(q).length === 0) {
+        prefix = t("invalid", cfg.lang);
+        return show(view, stack);
+      }
+      if (!forced) {
+        const idx = await lib.findIndexes(q, cfg.aliases, 8);
+        const next: View | null =
+          idx.length === 1 && idx[0]
+            ? { type: "index", messageId: idx[0].messageId }
+            : idx.length > 1
+              ? { type: "indexes", query: q }
+              : null;
+        if (next) return show(next, view.type === "indexes" ? stack : [...stack, view]);
+      }
       stack = view.type === "search" ? stack : [...stack, view];
-      return show({ type: "search", query, page: 1 }, stack);
+      return show({ type: "search", query: q, page: 1 }, stack);
     }
   }
 }

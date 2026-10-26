@@ -19,6 +19,8 @@ export interface SyncStats {
   inserted: number;
   updated: number;
   cursor: number | null;
+  /** Old index messages re-read this run (so edits to them are picked up). */
+  refreshedIndexes: number;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -35,7 +37,13 @@ export async function syncTelegram(
   const batchSize = opts.batchSize ?? 100;
   const retries = opts.maxRetries ?? 4;
   const sleep = opts.sleep ?? defaultSleep;
-  const stats: SyncStats = { fetched: 0, inserted: 0, updated: 0, cursor: null };
+  const stats: SyncStats = {
+    fetched: 0,
+    inserted: 0,
+    updated: 0,
+    cursor: null,
+    refreshedIndexes: 0,
+  };
   const runId = await store.startRun(opts.sourceKey);
 
   try {
@@ -63,6 +71,23 @@ export async function syncTelegram(
       await store.setCursor(opts.sourceKey, cursor);
       if (batch.exhausted || batch.lastId <= minId) break;
       minId = batch.lastId;
+    }
+    // Index messages are edited long after they are posted (new sheets, new lectures, new years):
+    // re-read all of them every run, which is a handful of ids, not the whole channel.
+    if (source.fetchByIds && store.indexMessageIds) {
+      const ids = await store.indexMessageIds();
+      if (ids.length > 0) {
+        const fresh = await withRetry(
+          () => source.fetchByIds?.(ids) ?? Promise.resolve([]),
+          retries,
+          sleep,
+        );
+        if (fresh.length > 0) {
+          const res = await store.upsertMany(fresh.map((m) => parseMessage(m, opts.ctx)));
+          stats.updated += res.updated;
+          stats.refreshedIndexes = fresh.length;
+        }
+      }
     }
     stats.cursor = cursor || null;
     await store.finishRun(runId, "ok", stats);

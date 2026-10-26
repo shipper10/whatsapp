@@ -1,7 +1,7 @@
 import { Api, TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions";
 import { FetchTooLargeError } from "../delivery/fetchers.js";
-import type { RawBatch, RawEntity, RawMedia, TelegramSource } from "./types.js";
+import type { RawBatch, RawEntity, RawMedia, RawTelegramMessage, TelegramSource } from "./types.js";
 
 export interface GramJsConfig {
   apiId: number;
@@ -72,6 +72,27 @@ export class GramJsSource implements TelegramSource {
     await this.client.disconnect();
   }
 
+  private toRaw(m: Api.Message): RawTelegramMessage {
+    return {
+      id: m.id,
+      date: new Date(m.date * 1000),
+      editDate: m.editDate ? new Date(m.editDate * 1000) : undefined,
+      text: m.message ?? "",
+      entities: toEntities(m),
+      media: toMedia(m),
+    };
+  }
+
+  async fetchByIds(ids: number[]): Promise<RawTelegramMessage[]> {
+    if (!this.entity) throw new Error("GramJsSource.connect() not called");
+    const out: RawTelegramMessage[] = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const msgs = await this.client.getMessages(this.entity, { ids: ids.slice(i, i + 100) });
+      for (const m of msgs) if (m instanceof Api.Message) out.push(this.toRaw(m));
+    }
+    return out;
+  }
+
   /** Id of the newest message in the channel (0 when empty). */
   private async topId(): Promise<number> {
     if (!this.entity) throw new Error("GramJsSource.connect() not called");
@@ -93,14 +114,7 @@ export class GramJsSource implements TelegramSource {
     const msgs = await this.client.getMessages(this.entity, { ids });
     const messages = msgs
       .filter((m): m is Api.Message => m instanceof Api.Message)
-      .map((m) => ({
-        id: m.id,
-        date: new Date(m.date * 1000),
-        editDate: m.editDate ? new Date(m.editDate * 1000) : undefined,
-        text: m.message ?? "",
-        entities: toEntities(m),
-        media: toMedia(m),
-      }))
+      .map((m) => this.toRaw(m))
       .sort((a, b) => a.id - b.id);
     return { messages, lastId: to, exhausted: to >= top };
   }

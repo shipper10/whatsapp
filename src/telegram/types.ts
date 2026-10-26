@@ -60,4 +60,6 @@ export interface RawBatch {
 export interface TelegramSource {
   /** The window of ids (minId, minId + limit], ascending; messages that do not exist are skipped. */
   fetchBatch(opts: { minId: number; limit: number }): Promise<RawBatch>;
+  /** Re-reads specific messages (used to pick up edits to old index messages). Missing ids are skipped. */
+  fetchByIds?(ids: number[]): Promise<RawTelegramMessage[]>;
 }

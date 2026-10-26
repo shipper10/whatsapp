@@ -10,6 +10,8 @@ export interface TelegramStore {
   setCursor(sourceKey: string, lastMessageId: number): Promise<void>;
   startRun(sourceKey: string): Promise<number>;
   finishRun(runId: number, status: "ok" | "error", stats: object, error?: string): Promise<void>;
+  /** Ids of every stored index message: these are re-read on each sync so edits to old indexes show up. */
+  indexMessageIds?(): Promise<number[]>;
 }
 
 export class DbTelegramStore implements TelegramStore {
@@ -53,6 +55,19 @@ export class DbTelegramStore implements TelegramStore {
       else updated++;
     }
     return { inserted, updated };
+  }
+
+  async indexMessageIds() {
+    const rows = await this.db
+      .select({ id: telegramMessages.messageId })
+      .from(telegramMessages)
+      .where(
+        and(
+          eq(telegramMessages.syncStatus, "active"),
+          sql`(${telegramMessages.entitiesJson}->>'isIndex')::boolean = true`,
+        ),
+      );
+    return rows.map((r) => r.id);
   }
 
   async getCursor(sourceKey: string) {

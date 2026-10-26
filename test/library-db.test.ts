@@ -16,6 +16,7 @@ import {
   recentResources,
   resourceDetail,
   resourcesInNode,
+  telegramMessageDetail,
 } from "../src/library/browse.js";
 import { searchResources } from "../src/library/search.js";
 import { DbTelegramStore } from "../src/telegram/store.js";
@@ -139,6 +140,13 @@ describe("classify + apply + search + browse", () => {
       "https://drive.google.com/file/d/drv1/view",
     );
 
+    // the index-driven path (by Telegram message id) must carry the Drive copy too
+    const viaMessage = await telegramMessageDetail(db, tg?.messageId ?? 0);
+    expect(viaMessage?.sources[0]?.type).toBe("telegram");
+    expect(viaMessage?.sources.find((x) => x.type === "google_drive")?.url).toBe(
+      "https://drive.google.com/file/d/drv1/view",
+    );
+
     // admin locks it onto another node; sync must not move it back
     const [other] = await db
       .select()
@@ -154,6 +162,48 @@ describe("classify + apply + search + browse", () => {
       .from(resources)
       .where(eq(resources.id, hit?.id ?? 0));
     expect(after?.academicNodeId).toBe(other?.id);
+  });
+
+  it("merges a Drive copy that has a different name but the same unique size and extension", async () => {
+    const rows = await db
+      .select()
+      .from(telegramMessages)
+      .where(sql`${telegramMessages.fileName} like '%.pdf'`);
+    const sizes = new Map<number, number>();
+    for (const r of rows)
+      if (r.fileSizeBytes) sizes.set(r.fileSizeBytes, (sizes.get(r.fileSizeBytes) ?? 0) + 1);
+    const tg = rows.find(
+      (r) =>
+        r.fileSizeBytes &&
+        sizes.get(r.fileSizeBytes) === 1 &&
+        !/Chemical Composition/.test(r.fileName ?? ""),
+    );
+    expect(tg).toBeTruthy();
+    const [src] = await db.select().from(driveSources).limit(1);
+    await new DbDriveStore(db).upsertFiles(
+      src?.id ?? 0,
+      [
+        {
+          driveFileId: "renamed1",
+          name: "totally different name.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: tg?.fileSizeBytes ?? null,
+          modifiedTime: null,
+          parentFolderId: "p",
+          folderPath: "Somewhere",
+          webViewLink: "https://drive.google.com/file/d/renamed1/view",
+        },
+      ],
+      new Date(),
+    );
+    await classifyAndApply(db, "BahriMed");
+    const d = await telegramMessageDetail(db, tg?.messageId ?? 0);
+    expect(d?.sources.find((x) => x.type === "google_drive")?.url).toBe(
+      "https://drive.google.com/file/d/renamed1/view",
+    );
+    // clean up so the next test's expectations (one Drive file) still hold
+    await db.delete(driveFiles).where(eq(driveFiles.driveFileId, "renamed1"));
+    await classifyAndApply(db, "BahriMed");
   });
 
   it("deactivates (never deletes) resources whose source disappeared", async () => {

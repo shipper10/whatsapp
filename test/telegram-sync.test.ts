@@ -12,6 +12,9 @@ const mk = (id: number, text = `msg ${id}`, edit?: Date): RawTelegramMessage => 
 });
 
 class FakeSource implements TelegramSource {
+  async fetchByIds(ids: number[]) {
+    return this.msgs.filter((m) => ids.includes(m.id));
+  }
   failNext = 0;
   calls = 0;
   constructor(public msgs: RawTelegramMessage[]) {}
@@ -33,6 +36,9 @@ class FakeSource implements TelegramSource {
 }
 
 class MemStore implements TelegramStore {
+  async indexMessageIds() {
+    return [...this.rows.values()].filter((r) => r.isIndex).map((r) => r.messageId);
+  }
   rows = new Map<number, TelegramRecord>();
   cursor: number | null = null;
   runs: string[] = [];
@@ -117,5 +123,26 @@ describe("syncTelegram", () => {
     const r = await syncTelegram(src, store, opts); // batchSize 3
     expect([...store.rows.keys()].sort((a, b) => a - b)).toEqual([1, 2, 3, 21, 22, 30]);
     expect(r.cursor).toBe(30);
+  });
+
+  it("re-reads old index messages every run, even far behind the rescan window", async () => {
+    const idx = (id: number, text: string): RawTelegramMessage => ({
+      id,
+      date: new Date(2026, 0, 1),
+      text,
+      entities: [
+        { type: "text_link", offset: 0, length: 1, url: "https://t.me/x/50" },
+        { type: "text_link", offset: 1, length: 1, url: "https://t.me/x/51" },
+      ],
+    });
+    const msgs = [idx(1, "ab"), ...Array.from({ length: 500 }, (_, i) => mk(i + 2))];
+    const src = new FakeSource(msgs);
+    const store = new MemStore();
+    await syncTelegram(src, store, { ...opts, batchSize: 100, rescanWindow: 5 });
+    expect(store.rows.get(1)?.textOrCaption).toBe("ab");
+    src.msgs = [idx(1, "ab + new sheet added later"), ...msgs.slice(1)];
+    const r = await syncTelegram(src, store, { ...opts, batchSize: 100, rescanWindow: 5 });
+    expect(store.rows.get(1)?.textOrCaption).toBe("ab + new sheet added later");
+    expect(r.refreshedIndexes).toBe(1);
   });
 });

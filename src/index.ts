@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { createAdminHook } from "./admin/commands.js";
 import { createHandler } from "./bot/handler.js";
+import { ReplyTracker } from "./bot/replyTracker.js";
 import { loadEnv } from "./config/env.js";
 import { DbSessionStore } from "./core/session/store.js";
 import { createDb } from "./db/client.js";
@@ -70,13 +71,15 @@ const baileys =
         minSendGapMs: () => settings.get("whatsapp.minSendGapMs"),
       })
     : null;
-const provider: WhatsAppProvider =
+const replies = new ReplyTracker();
+const provider: WhatsAppProvider = replies.wrap(
   baileys ??
-  new OpenWaProvider({
-    baseUrl: env.OPENWA_BASE_URL,
-    apiKey: env.OPENWA_API_KEY ?? "",
-    sessionId: env.OPENWA_SESSION_ID ?? "",
-  });
+    new OpenWaProvider({
+      baseUrl: env.OPENWA_BASE_URL,
+      apiKey: env.OPENWA_API_KEY ?? "",
+      sessionId: env.OPENWA_SESSION_ID ?? "",
+    }),
+);
 const library = new DbLibrary(db);
 const sessions = new DbSessionStore(db);
 
@@ -138,6 +141,7 @@ const adminHook = createAdminHook({
   },
 });
 const handler = createHandler({
+  replies,
   provider,
   settings,
   sessions,

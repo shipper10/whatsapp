@@ -28,6 +28,9 @@ For each Drive folder the bot should index: open it in Drive > **Share** > paste
 ```
 `/sources` lists them, `/source off <id>` pauses one. `/status` shows a source error if the folder was not shared with the service-account email.
 
+## How Drive links appear
+A Drive file is attached to a Telegram file when they are clearly the same file: same name and size, or (if the name differs) the same size and extension and no other candidate. The Drive link is then added to the file's caption when it is sent. Files that cannot be matched safely stay as separate library entries found by search (`؟ كلمة`).
+
 ## Notes
 - Indexing reads **metadata only** (names, sizes, folder paths).
 - Sending Drive files themselves is off by default. Turn it on only if you want it: `/set delivery.driveDownload true` (the key then needs read access to file contents, which the Viewer share already gives).

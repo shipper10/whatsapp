@@ -3,6 +3,7 @@ import type { Db } from "../db/client.js";
 import {
   childNodes,
   indexMessage,
+  indexTitles,
   messageKinds,
   nodeInfo,
   recentResources,
@@ -11,6 +12,7 @@ import {
   rootIndexId,
   telegramMessageDetail,
 } from "./browse.js";
+import { matchIndexes } from "./indexSearch.js";
 import { searchResources } from "./search.js";
 
 export class DbLibrary implements LibraryPort {
@@ -25,6 +27,8 @@ export class DbLibrary implements LibraryPort {
   detail = (id: number) => resourceDetail(this.db, id);
   indexMessage = (messageId: number) => indexMessage(this.db, messageId);
   rootIndexId = () => rootIndexId(this.db);
+  findIndexes = async (query: string, aliases: string[], limit: number) =>
+    matchIndexes(await indexTitles(this.db), query, aliases, limit);
   messageKinds = (ids: number[]) => messageKinds(this.db, ids);
   messageDetail = (messageId: number) => telegramMessageDetail(this.db, messageId);
 }
