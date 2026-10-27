@@ -7,7 +7,8 @@ export interface ProgressSink {
   file(name: string, sizeBytes: number | null): void;
   queued(position: number): void;
   downloading(done: number, total: number | null): void;
-  uploading(): void;
+  /** Resolves once the "sending" status is visible, so the file never lands before its status. */
+  uploading(): Promise<void>;
   fileDone(ok: boolean): void;
   end(): Promise<void>;
 }
@@ -26,9 +27,10 @@ export interface ProgressOptions {
 
 const MB = 1024 * 1024;
 const fmtMb = (n: number) => `${(n / MB).toFixed(n >= 10 * MB ? 0 : 1)}`;
+/** Steps of 10% on purpose: the text only changes ~10 times per download, which keeps message edits few. */
 const bar = (pct: number) => {
-  const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
-  return `[${"█".repeat(filled)}${"░".repeat(10 - filled)}] ${Math.round(pct)}%`;
+  const step = Math.max(0, Math.min(10, Math.floor(pct / 10)));
+  return `[${"█".repeat(step)}${"░".repeat(10 - step)}] ${step * 10}%`;
 };
 const clip = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -55,6 +57,8 @@ export class WhatsAppProgress implements ProgressSink {
   private canEdit = true;
   private lastText = "";
   private lastEditAt = 0;
+  private edits = 0;
+  private firstSentAt = 0;
   private pending: NodeJS.Timeout | null = null;
   private ticker: NodeJS.Timeout | null = null;
   private uploadStartedAt = 0;
@@ -63,7 +67,7 @@ export class WhatsAppProgress implements ProgressSink {
   private readonly now: () => number;
 
   constructor(private readonly o: ProgressOptions) {
-    this.gap = o.minEditGapMs ?? 3000;
+    this.gap = o.minEditGapMs ?? 4000;
     this.now = o.now ?? Date.now;
   }
 
@@ -103,12 +107,14 @@ export class WhatsAppProgress implements ProgressSink {
     this.refresh();
   }
 
-  uploading() {
+  async uploading() {
     this.phase = "upload";
     this.uploadStartedAt = this.now();
-    this.ticker ??= setInterval(() => this.refresh(), 5000);
+    this.ticker ??= setInterval(() => this.refresh(), 15000);
     this.ticker.unref?.();
     this.refresh(true);
+    // Wait (briefly) for the edit to land so the status is never behind the file itself.
+    await Promise.race([this.chain, new Promise<void>((r) => setTimeout(r, 4000).unref?.())]);
   }
 
   fileDone(ok: boolean) {
@@ -161,8 +167,8 @@ export class WhatsAppProgress implements ProgressSink {
       const t = this.total_;
       line =
         t > 0
-          ? `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"} ${bar((this.done / t) * 100)} (${fmtMb(this.done)}/${fmtMb(t)} MB)`
-          : `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"} ${fmtMb(this.done)} MB`;
+          ? `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"} ${bar((this.done / t) * 100)} (${fmtMb(t)} MB)`
+          : `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"}…`;
     } else if (this.phase === "upload") {
       const s = Math.round((this.now() - this.uploadStartedAt) / 1000);
       line = ar ? `⬆️ جاري الإرسال إلى واتساب… ${s}ث` : `⬆️ Sending to WhatsApp… ${s}s`;
@@ -204,6 +210,7 @@ export class WhatsAppProgress implements ProgressSink {
           quoteMessageId: this.o.quoteMessageId,
         });
         this.messageId = res.providerMessageId;
+        this.firstSentAt = this.now();
         this.lastText = text;
         this.lastEditAt = this.now();
         return;
@@ -213,9 +220,14 @@ export class WhatsAppProgress implements ProgressSink {
         if (final) await this.o.provider.sendText({ conversationId: this.o.conversationId, text });
         return;
       }
+      // WhatsApp only allows editing for ~15 minutes, and a cap keeps a long transfer from looking like spam.
+      if (!final && (this.edits >= 40 || this.now() - this.firstSentAt > 14 * 60_000)) return;
+      this.edits++;
       const ok = await this.o.provider.editText(this.o.conversationId, this.messageId, text);
-      if (!ok) this.canEdit = false;
-      else {
+      if (!ok) {
+        this.canEdit = false;
+        if (final) await this.o.provider.sendText({ conversationId: this.o.conversationId, text });
+      } else {
         this.lastText = text;
         this.lastEditAt = this.now();
       }

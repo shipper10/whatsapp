@@ -9,6 +9,7 @@ import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
 import type { FileFetcher } from "./fetchers.js";
 import { formatLinksMessage, type LinkFlags, visibleLinks } from "./links.js";
+import { typeAllowed } from "./typeFilter.js";
 import type { Deliverer, DeliveryTarget } from "./types.js";
 
 export interface DeliveryLog {
@@ -29,11 +30,6 @@ export interface FileDelivererDeps {
   concurrency: number;
   logger: { warn: (o: object, m?: string) => void };
 }
-
-const mimeAllowed = (mime: string | null, allowed: string[]) =>
-  allowed.length === 0 ||
-  (mime !== null &&
-    allowed.some((a) => (a.endsWith("/*") ? mime.startsWith(a.slice(0, -1)) : mime === a)));
 
 /** Short, user-safe failure label. Raw errors (paths, tokens, stack traces) never reach logs or users. */
 const sanitize = (err: unknown) =>
@@ -136,11 +132,12 @@ export class FileDeliverer implements Deliverer {
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
   }> {
-    const [maxMb, allowed, timeoutS, driveOn] = await Promise.all([
+    const [maxMb, allowed, timeoutS, driveOn, audioMode] = await Promise.all([
       this.d.settings.get("delivery.maxAttachmentMb"),
       this.d.settings.get("delivery.allowedMediaTypes"),
       this.d.settings.get("delivery.timeoutSeconds"),
       this.d.settings.get("delivery.driveDownload"),
+      this.d.settings.get("delivery.audioMode"),
     ]);
     const maxBytes = maxMb * 1024 * 1024;
 
@@ -160,7 +157,7 @@ export class FileDeliverer implements Deliverer {
       (c) => c.src.sizeBytes === null || c.src.sizeBytes <= maxBytes,
     );
     if (usable.length === 0) return { status: "too_large" };
-    const typeOk = usable.filter((c) => mimeAllowed(c.src.mimeType, allowed));
+    const typeOk = usable.filter((c) => typeAllowed(c.src.mimeType, c.src.fileName, allowed));
     if (typeOk.length === 0) return { status: "type_blocked" };
 
     // Without a progress reporter, big files at least get a one-line heads-up.
@@ -189,7 +186,7 @@ export class FileDeliverer implements Deliverer {
           target.progress?.downloading(done, total ?? src.sizeBytes);
         });
         clearTimeout(timer);
-        target.progress?.uploading();
+        await target.progress?.uploading();
         const res = await this.d.provider.sendDocument({
           conversationId: target.conversationId,
           filePath: file.path,
@@ -197,6 +194,7 @@ export class FileDeliverer implements Deliverer {
           mimeType: file.mimeType,
           caption,
           quoteMessageId: target.quoteMessageId,
+          audioAsDocument: audioMode === "document",
         });
         if (res.confirmed) return { status: "sent" };
         lastError = res.error ?? "SendNotConfirmed";

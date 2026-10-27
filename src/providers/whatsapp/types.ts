@@ -33,6 +33,8 @@ export interface OutgoingDocument {
   mimeType?: string;
   caption?: string;
   quoteMessageId?: string;
+  /** Send audio files as attachments rather than playable audio messages. */
+  audioAsDocument?: boolean;
 }
 
 export interface SendResult {

@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import type {
   AnyMessageContent,
   AuthenticationState,
@@ -22,6 +22,21 @@ import type {
 import { useDbAuthState } from "./authState.js";
 import { extractIncoming } from "./extract.js";
 import { planMedia } from "./media.js";
+
+async function readHead(path: string, n: number): Promise<Buffer | undefined> {
+  try {
+    const fh = await open(path, "r");
+    try {
+      const buf = Buffer.alloc(n);
+      const { bytesRead } = await fh.read(buf, 0, n, 0);
+      return buf.subarray(0, bytesRead);
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
 
 /** The slice of the Baileys socket this provider uses (lets tests inject a fake). */
 export interface SocketLike {
@@ -301,13 +316,17 @@ export class BaileysProvider implements WhatsAppProvider {
       const size = await stat(msg.filePath)
         .then((s) => s.size)
         .catch(() => undefined);
+      const head = await readHead(msg.filePath, 256);
       const plan = planMedia({
         filePath: msg.filePath,
         fileName: msg.fileName,
         mimeType: msg.mimeType,
         caption: msg.caption,
         sizeBytes: size,
+        head,
+        audioAsDocument: msg.audioAsDocument,
       });
+      this.deps.logger.info({ kind: plan.kind, size, name: msg.fileName }, "sending file");
       const res = await this.deliver(msg.conversationId, plan.content, msg.quoteMessageId);
       if (res.confirmed && plan.followUpText) {
         await this.deliver(msg.conversationId, { text: plan.followUpText }, msg.quoteMessageId);

@@ -31,12 +31,12 @@ describe("planMedia", () => {
     });
   });
   it("falls back to a document with the right type when the file is too big for an inline kind", () => {
-    const big = plan("lecture.opus", 40 * 1024 * 1024);
+    const big = plan("lecture.opus", 100 * 1024 * 1024);
     expect(big.kind).toBe("document");
     expect(big.content).toMatchObject({
       document: { url: "/tmp/x/lecture.opus" },
       mimetype: "audio/ogg",
-      fileName: "lecture.opus",
+      fileName: "lecture.ogg",
     });
     expect(plan("movie.mp4", 200 * 1024 * 1024).kind).toBe("document");
   });
@@ -62,5 +62,49 @@ describe("withExtension", () => {
     expect(withExtension("photo-7", "image/jpeg")).toBe("photo-7.jpg");
     expect(withExtension("Sheet.pdf", "application/pdf")).toBe("Sheet.pdf");
     expect(withExtension("blob", "application/x-unknown")).toBe("blob");
+  });
+});
+
+import { sniffAudio } from "../src/providers/whatsapp/baileys/media.js";
+
+describe("audio sniffing", () => {
+  const ogg = Buffer.concat([
+    Buffer.from("OggS"),
+    Buffer.alloc(24),
+    Buffer.from("OpusHead"),
+    Buffer.alloc(20),
+  ]);
+  it("detects containers from bytes", () => {
+    expect(sniffAudio(ogg)).toBe("ogg-opus");
+    expect(sniffAudio(Buffer.concat([Buffer.from("OggS"), Buffer.alloc(40)]))).toBe("ogg-other");
+    expect(sniffAudio(Buffer.concat([Buffer.from("ID3"), Buffer.alloc(20)]))).toBe("mp3");
+    expect(sniffAudio(Buffer.alloc(3))).toBeNull();
+  });
+  it("sends opus as .ogg audio, trusting bytes over the name", () => {
+    const p = planMedia({ filePath: "/t/a.bin", fileName: "a.opus", sizeBytes: 1000, head: ogg });
+    expect(p.kind).toBe("audio");
+    expect(p.content).toMatchObject({ mimetype: "audio/ogg; codecs=opus" });
+  });
+  it("audioAsDocument sends a renamed .ogg attachment", () => {
+    const p = planMedia({
+      filePath: "/t/a.opus",
+      fileName: "a.opus",
+      sizeBytes: 1000,
+      head: ogg,
+      audioAsDocument: true,
+    });
+    expect(p.kind).toBe("document");
+    expect(p.content).toMatchObject({ fileName: "a.ogg", mimetype: "audio/ogg" });
+  });
+  it("wav goes as a document, not an audio message", () => {
+    const wav = Buffer.concat([
+      Buffer.from("RIFF"),
+      Buffer.alloc(4),
+      Buffer.from("WAVE"),
+      Buffer.alloc(8),
+    ]);
+    expect(
+      planMedia({ filePath: "/t/a.wav", fileName: "a.wav", sizeBytes: 10, head: wav }).kind,
+    ).toBe("document");
   });
 });

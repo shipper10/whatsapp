@@ -106,7 +106,16 @@ export const settingsRegistry = {
     schema: z.array(z.string()),
     default: [],
     restart: false,
-    description: "Allowed MIME prefixes/types for attachments. Empty = allow all.",
+    description:
+      "Which file types may be sent as real files (others get links only). Empty = all. Accepts names like pdf, docx, audio, video, image, extensions (.mp3) or MIME types (application/pdf, audio/*). Comma separated, e.g. /set delivery.allowedMediaTypes pdf,audio",
+  }),
+  "delivery.audioMode": def({
+    schema: z.enum(["audio", "document"]),
+    default: "audio",
+    envName: "DELIVERY_AUDIO_MODE",
+    restart: false,
+    description:
+      "audio = sound files arrive as playable WhatsApp audio messages; document = as attachments (use if audio messages fail on your recipients' phones).",
   }),
   "keepalive.intervalMinutes": def({
     schema: z.coerce.number().int().min(0).max(60),

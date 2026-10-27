@@ -65,3 +65,9 @@ Render's free tier gives 750 instance-hours per month: enough for one always-on 
 - Audio/video/image files are sent as proper WhatsApp media with correct MIME types (this fixes `.opus` "unusual format" errors); everything else is a document. WhatsApp's own limits apply (documents up to 2 GB).
 - `links.telegram` / `links.drive`: show or hide each kind of link independently (env `SHOW_TELEGRAM_LINKS`, `SHOW_DRIVE_LINKS`).
 - Progress and queue: requests wait in a FIFO queue (`delivery.concurrency`, default 2; use 1 on small hosts). A status message is edited with queue position, download percent and "sending" (`delivery.progress`, `delivery.progressMinMb`). Each transfer needs temporary disk of about 2x the file size, so with several 1 GB requests keep concurrency at 1. The timeout (`delivery.timeoutSeconds`) now counts only time without progress. WhatsApp gives no upload percentage; the message shows elapsed time while sending.
+
+## 7. Admin commands for sending (send them to the bot from an admin number)
+- `/settings` lists every setting; `/set <key> <value>`; `/reset <key>`.
+- File types sent as real files (others get links only): `/set delivery.allowedMediaTypes pdf,audio` (words: pdf, docx, audio, video, image, document; extensions like `.mp3`; MIME like `application/pdf` or `audio/*`). Back to everything: `/reset delivery.allowedMediaTypes`.
+- Sound files: arrive as playable audio messages (Ogg/Opus is detected from the file's bytes and sent as `.ogg`). If they still fail on a phone: `/set delivery.audioMode document`.
+- Status message edits are limited on purpose (10% steps, at least 4 s apart, at most 40 edits, none after ~14 min) to stay far from anything that looks like spam.
