@@ -6,6 +6,14 @@ const GROUPS: Record<string, string[]> = {
   photo: ["image/*"],
   document: ["application/*", "text/*"],
   documents: ["application/*", "text/*"],
+  doc: [".doc", ".docx"],
+  docs: [".doc", ".docx"],
+  word: [".doc", ".docx"],
+  excel: [".xls", ".xlsx"],
+  sheet: [".xls", ".xlsx"],
+  ppt: [".ppt", ".pptx"],
+  powerpoint: [".ppt", ".pptx"],
+  slides: [".ppt", ".pptx"],
   office: [".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"],
 };
 

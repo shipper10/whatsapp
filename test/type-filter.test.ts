@@ -16,3 +16,11 @@ describe("typeAllowed", () => {
     expect(typeAllowed("audio/mpeg", "a.mp3", ["audio/*"])).toBe(true);
   });
 });
+
+describe("word aliases", () => {
+  it("doc/docs/word cover doc and docx", () => {
+    expect(typeAllowed(null, "a.docx", ["docs"])).toBe(true);
+    expect(typeAllowed(null, "a.doc", ["word"])).toBe(true);
+    expect(typeAllowed(null, "a.pptx", ["docs"])).toBe(false);
+  });
+});

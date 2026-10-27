@@ -74,7 +74,7 @@ function parseValue(key: SettingKey, raw: string): unknown {
   const isArray = def.schema.safeParse([]).success && !def.schema.safeParse("x").success;
   if (isArray && typeof v === "string")
     return v
-      .split(/[,،]/)
+      .split(/[,،\s]+/)
       .map((x) => x.trim())
       .filter(Boolean);
   return v;
