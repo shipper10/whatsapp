@@ -117,6 +117,14 @@ export const settingsRegistry = {
     description:
       "audio = sound files arrive as playable WhatsApp audio messages; document = as attachments (use if audio messages fail on your recipients' phones).",
   }),
+  "delivery.audioNormalize": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "DELIVERY_AUDIO_NORMALIZE",
+    restart: false,
+    description:
+      "Re-encode sound files to clean mono Ogg/Opus before sending (fixes 'audio not available' on files WhatsApp dislikes). Needs ffmpeg; skipped if absent.",
+  }),
   "keepalive.intervalMinutes": def({
     schema: z.coerce.number().int().min(0).max(60),
     default: 10,

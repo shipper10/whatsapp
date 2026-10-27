@@ -70,4 +70,5 @@ Render's free tier gives 750 instance-hours per month: enough for one always-on 
 - `/settings` lists every setting; `/set <key> <value>`; `/reset <key>`.
 - File types sent as real files (others get links only): `/set delivery.allowedMediaTypes pdf,audio` (words: pdf, docx, audio, video, image, document; extensions like `.mp3`; MIME like `application/pdf` or `audio/*`). Back to everything: `/reset delivery.allowedMediaTypes`.
 - Sound files: arrive as playable audio messages (Ogg/Opus is detected from the file's bytes and sent as `.ogg`). If they still fail on a phone: `/set delivery.audioMode document`.
+- Before sending, sound files are re-encoded to clean mono Ogg/Opus (bundled `ffmpeg-static`, or your own via `FFMPEG_PATH`); this removes odd metadata/cover art that makes WhatsApp say "audio is not available". Turn off with `/set delivery.audioNormalize false`. If ffmpeg cannot run the original is sent.
 - Status message edits are limited on purpose (10% steps, at least 4 s apart, at most 40 edits, none after ~14 min) to stay far from anything that looks like spam.

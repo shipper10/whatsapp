@@ -12,6 +12,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
 } from "@whiskeysockets/baileys";
 import type { Db } from "../../../db/client.js";
+import { normalizeAudio } from "../../../delivery/transcode.js";
 import type {
   IncomingMessage,
   OutgoingDocument,
@@ -21,7 +22,7 @@ import type {
 } from "../types.js";
 import { useDbAuthState } from "./authState.js";
 import { extractIncoming } from "./extract.js";
-import { planMedia } from "./media.js";
+import { isAudioName, planMedia, sniffAudio } from "./media.js";
 
 async function readHead(path: string, n: number): Promise<Buffer | undefined> {
   try {
@@ -316,13 +317,36 @@ export class BaileysProvider implements WhatsAppProvider {
       const size = await stat(msg.filePath)
         .then((s) => s.size)
         .catch(() => undefined);
-      const head = await readHead(msg.filePath, 256);
+      let filePath = msg.filePath;
+      let fileName = msg.fileName;
+      let sizeBytes = size;
+      let head = await readHead(filePath, 256);
+      if (
+        msg.normalizeAudio &&
+        !msg.audioAsDocument &&
+        (sniffAudio(head) || isAudioName(fileName))
+      ) {
+        const out = await normalizeAudio(filePath, `${filePath}.wa.ogg`);
+        if (out) {
+          filePath = out;
+          fileName = `${fileName.replace(/\.[a-z0-9]{1,6}$/i, "")}.ogg`;
+          sizeBytes = await stat(out)
+            .then((s) => s.size)
+            .catch(() => sizeBytes);
+          head = await readHead(out, 256);
+        } else {
+          this.deps.logger.warn(
+            { name: msg.fileName },
+            "audio re-encode unavailable, sending original",
+          );
+        }
+      }
       const plan = planMedia({
-        filePath: msg.filePath,
-        fileName: msg.fileName,
+        filePath,
+        fileName,
         mimeType: msg.mimeType,
         caption: msg.caption,
-        sizeBytes: size,
+        sizeBytes,
         head,
         audioAsDocument: msg.audioAsDocument,
       });

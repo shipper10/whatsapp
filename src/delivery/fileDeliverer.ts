@@ -132,12 +132,13 @@ export class FileDeliverer implements Deliverer {
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
   }> {
-    const [maxMb, allowed, timeoutS, driveOn, audioMode] = await Promise.all([
+    const [maxMb, allowed, timeoutS, driveOn, audioMode, normalize] = await Promise.all([
       this.d.settings.get("delivery.maxAttachmentMb"),
       this.d.settings.get("delivery.allowedMediaTypes"),
       this.d.settings.get("delivery.timeoutSeconds"),
       this.d.settings.get("delivery.driveDownload"),
       this.d.settings.get("delivery.audioMode"),
+      this.d.settings.get("delivery.audioNormalize"),
     ]);
     const maxBytes = maxMb * 1024 * 1024;
 
@@ -195,6 +196,7 @@ export class FileDeliverer implements Deliverer {
           caption,
           quoteMessageId: target.quoteMessageId,
           audioAsDocument: audioMode === "document",
+          normalizeAudio: normalize,
         });
         if (res.confirmed) return { status: "sent" };
         lastError = res.error ?? "SendNotConfirmed";

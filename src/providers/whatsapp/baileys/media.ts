@@ -155,3 +155,5 @@ export function planMedia(m: MediaInput): MediaPlan {
     },
   };
 }
+
+export const isAudioName = (name: string) => extensionOf(name) in AUDIO;
