@@ -37,7 +37,7 @@ export class ReplyTracker {
 
   /** Use the returned provider everywhere the bot sends (handler and file delivery). */
   wrap(inner: WhatsAppProvider): WhatsAppProvider {
-    return {
+    const wrapped: WhatsAppProvider = {
       name: inner.name,
       sendText: async (m: OutgoingText) => {
         const res = await inner.sendText(m);
@@ -50,5 +50,8 @@ export class ReplyTracker {
         return res;
       },
     };
+    if (inner.editText)
+      wrapped.editText = (c, id, text) => inner.editText?.(c, id, text) ?? Promise.resolve(false);
+    return wrapped;
   }
 }

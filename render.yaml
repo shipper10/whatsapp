@@ -1,0 +1,37 @@
+# Render Blueprint: New > Blueprint > pick this repo, then fill the secret values in the dashboard.
+# Moving to another Render account = same blueprint + the same env values (see docs/MIGRATION.md).
+services:
+  - type: web
+    name: library-bot
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: WHATSAPP_PROVIDER
+        value: baileys
+      - key: DB_POOL_MAX
+        value: "3"
+      - key: TEMP_FILE_DIR
+        value: /tmp/bot
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_HTTP_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      - key: TELEGRAM_CHANNEL
+        sync: false
+      - key: TELEGRAM_SESSION_STRING
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
+        sync: false

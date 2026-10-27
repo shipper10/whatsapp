@@ -70,6 +70,8 @@ export interface BotConfig {
   rootIndexId: number;
   /** "arabic=english" pairs used when jumping to an index by name. */
   aliases: string[];
+  /** Whether Telegram / Google Drive links may be shown to people. */
+  showLinks: { telegram: boolean; drive: boolean };
   /** Most files sent for one request. */
   maxBatch: number;
 }

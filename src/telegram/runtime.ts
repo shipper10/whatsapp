@@ -57,10 +57,15 @@ export class TelegramRuntime implements TelegramSource, TelegramMediaDownloader 
     }
   }
 
-  async downloadMedia(messageId: number, destPath: string, maxBytes: number): Promise<void> {
+  async downloadMedia(
+    messageId: number,
+    destPath: string,
+    maxBytes: number,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<void> {
     const s = await this.ensure();
     try {
-      await s.downloadMedia(messageId, destPath, maxBytes);
+      await s.downloadMedia(messageId, destPath, maxBytes, onProgress);
     } catch (err) {
       if ((err as Error).name !== "Error" || !/size limit/.test((err as Error).message))
         await this.reset();

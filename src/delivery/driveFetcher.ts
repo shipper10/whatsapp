@@ -35,6 +35,7 @@ export class DriveFetcher implements FileFetcher {
     destDir: string,
     maxBytes: number,
     signal: AbortSignal,
+    onProgress?: (done: number, total: number | null) => void,
   ): Promise<FetchedFile> {
     if (!(await this.enabled())) throw new Error("drive download disabled");
     const res = await this.api.files.get(
@@ -43,7 +44,9 @@ export class DriveFetcher implements FileFetcher {
     );
     const fileName = safeFileName(src.fileName, "file");
     const path = join(destDir, fileName);
-    await streamToFile(res.data as NodeJS.ReadableStream, path, maxBytes);
+    await streamToFile(res.data as NodeJS.ReadableStream, path, maxBytes, (done) =>
+      onProgress?.(done, src.sizeBytes),
+    );
     return {
       path,
       fileName,

@@ -126,7 +126,7 @@ describe("FileDeliverer", () => {
     expect(provider.docs).toHaveLength(1);
     expect(provider.docs[0]?.fileName).toBe("Sheet 7.pdf");
     expect(provider.docs[0]?.caption).toBe(
-      "Sheet 7\n\n☁️ Google Drive: https://drive.google.com/file/d/d1/view",
+      "Sheet 7\n\n✈️ Telegram: https://t.me/BahriMed/59\n☁️ Google Drive: https://drive.google.com/file/d/d1/view",
     );
     expect(provider.sent).toHaveLength(0); // the file carries its text; no separate links message
     expect(records).toEqual([{ outcome: "file_sent", error: undefined }]);
@@ -260,6 +260,39 @@ describe("FileDeliverer", () => {
     expect(provider.sent).toHaveLength(0);
   });
 
+  it("shows Telegram and Drive links independently according to the settings", async () => {
+    const d = { ...detail([tg, drv]), caption: "📔 Sheet 7" };
+    const run = async (settings: Record<string, unknown>) => {
+      const f = new FakeFetcher("telegram");
+      const { provider, deliverer } = await setup(d, [f], settings);
+      await deliverer.deliverMessage(59, target);
+      return provider.docs[0]?.caption ?? "";
+    };
+    const both = await run({});
+    expect(both).toContain("t.me/BahriMed/59");
+    expect(both).toContain("drive.google.com");
+    const noDrive = await run({ "links.drive": false });
+    expect(noDrive).toContain("t.me/BahriMed/59");
+    expect(noDrive).not.toContain("drive.google.com");
+    const noTg = await run({ "links.telegram": false });
+    expect(noTg).not.toContain("t.me");
+    expect(noTg).toContain("drive.google.com");
+    expect(await run({ "links.telegram": false, "links.drive": false })).toBe("📔 Sheet 7");
+  });
+
+  it("with links hidden, a failed send says so without pointing at links or claiming the file is missing", async () => {
+    const f = new FakeFetcher("telegram", "fail");
+    const { provider, deliverer } = await setup(detail([tg, drv]), [f], {
+      "links.telegram": false,
+      "links.drive": false,
+    });
+    await deliverer.deliver(1, target);
+    const text = provider.last();
+    expect(text).toContain("تعذّر إرسال الملف");
+    expect(text).not.toContain("http");
+    expect(text).not.toContain("غير متاح");
+  });
+
   it("uses the Telegram text (without navigation lines or hashtags) as the caption", async () => {
     const f = new FakeFetcher("telegram");
     const d = {
@@ -267,7 +300,7 @@ describe("FileDeliverer", () => {
       caption:
         "📔 Cell Biology Sheet 3\nThe stem cell\n↩️ Return to Cell Biology Index\n#Cell_Biology #Sheet",
     };
-    const { provider, deliverer } = await setup(d, [f]);
+    const { provider, deliverer } = await setup(d, [f], { "links.telegram": false });
     await deliverer.deliverMessage(59, target);
     expect(provider.docs[0]?.caption).toBe("📔 Cell Biology Sheet 3\nThe stem cell");
   });

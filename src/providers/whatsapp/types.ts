@@ -46,4 +46,6 @@ export interface WhatsAppProvider {
   readonly name: string;
   sendText(msg: OutgoingText): Promise<SendResult>;
   sendDocument(msg: OutgoingDocument): Promise<SendResult>;
+  /** Replaces the text of a message this bot sent (status/progress messages). Returns false if not possible. */
+  editText?(conversationId: string, messageId: string, text: string): Promise<boolean>;
 }

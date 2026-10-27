@@ -103,7 +103,11 @@ async function renderIndexView(
 ): Promise<Rendered> {
   const msg = await lib.indexMessage(messageId);
   if (!msg) return { texts: [t("indexMissing", cfg.lang)], items: [], hasNext: false };
-  const r = renderIndex(msg);
+  const r = renderIndex(msg, {
+    hideUrl: (u) =>
+      (!cfg.showLinks.drive && /(^|\.)drive\.google\.com|docs\.google\.com/i.test(u)) ||
+      (!cfg.showLinks.telegram && /(^|\/\/)(www\.)?(t|telegram)\.me\//i.test(u)),
+  });
   const items: Item[] = r.entries.map((e) => ({
     kind: "link",
     id: e.targetId,
@@ -355,7 +359,6 @@ export async function step(
         prefix = notes.join("\n") || t("invalid", cfg.lang);
         return show(view, stack);
       }
-      if (total > 1) notes.push(t("sendingMany", cfg.lang).replace("{n}", String(total)));
       return {
         state,
         replies: notes.length ? [notes.join("\n")] : [],

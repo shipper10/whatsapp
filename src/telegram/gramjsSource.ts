@@ -123,13 +123,24 @@ export class GramJsSource implements TelegramSource {
    * Downloads one message's media to `destPath`. Checks the declared size first so oversized files
    * are never transferred. Used only for delivery, never for indexing.
    */
-  async downloadMedia(messageId: number, destPath: string, maxBytes: number): Promise<void> {
+  async downloadMedia(
+    messageId: number,
+    destPath: string,
+    maxBytes: number,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<void> {
     if (!this.entity) throw new Error("GramJsSource.connect() not called");
     const [msg] = await this.client.getMessages(this.entity, { ids: [messageId] });
     if (!(msg instanceof Api.Message) || !msg.media) throw new Error("message has no media");
     const media = toMedia(msg);
     if (media?.sizeBytes !== undefined && media.sizeBytes > maxBytes)
       throw new FetchTooLargeError();
-    await this.client.downloadMedia(msg, { outputFile: destPath });
+    await this.client.downloadMedia(msg, {
+      outputFile: destPath,
+      progressCallback: onProgress
+        ? (downloaded: { toString(): string }, total: { toString(): string }) =>
+            onProgress(Number(downloaded.toString()), Number(total.toString()))
+        : undefined,
+    });
   }
 }

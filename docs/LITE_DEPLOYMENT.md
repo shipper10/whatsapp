@@ -26,7 +26,7 @@ ADMIN_HTTP_TOKEN=<long random string, 16+ chars>
 ADMIN_IDS=<your WhatsApp id after linking, e.g. 2499xxxxxxx@s.whatsapp.net>
 TEMP_FILE_DIR=/tmp/bot
 TELEGRAM_API_ID / TELEGRAM_API_HASH / TELEGRAM_CHANNEL / TELEGRAM_SESSION_STRING   (see docs/LOCAL_TESTING.md for the one-time login)
-GOOGLE_SERVICE_ACCOUNT_JSON_PATH=<path to uploaded key file>   (optional)
+GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=<base64 of the key file>   (optional; or GOOGLE_SERVICE_ACCOUNT_JSON / _JSON_PATH)
 ```
 Store these in the host's secret/environment panel, never in the repo. Tunables (reply mode, page size, send gap `WHATSAPP_MIN_SEND_GAP_MS`, intervals...) are runtime settings changed from WhatsApp admin commands.
 
@@ -53,3 +53,15 @@ Use a dedicated number for the bot (it can be a spare SIM kept only for WhatsApp
 - Memory: about 140 MB RSS measured idle; Telegram/Drive syncs and file sends add to it. Lower `sync.concurrency` and `delivery.concurrency` if the host kills the process.
 - Free bot hosts may require periodic renewal (bot-hosting.net: every few days) and may sleep; the bot reconnects on its own.
 - File delivery downloads each file to disk first; `delivery.maxAttachmentMb` caps size (default keeps links-only for large files).
+
+
+## 5. Keep it awake (Render free)
+A free Render web service sleeps after ~15 minutes without incoming web traffic. The bot handles this two ways:
+- **Self-ping**: on Render it reads `RENDER_EXTERNAL_URL` (set automatically) and pings itself every `keepalive.intervalMinutes` (default 10; env `KEEPALIVE_INTERVAL_MINUTES`, 0 disables; set `KEEPALIVE_URL` for other hosts). Each tick also reads the database, so Supabase never counts the project as inactive.
+- **UptimeRobot** (extra safety): create a monitor of type *HTTP(s)*, URL `https://<your-service>.onrender.com/healthz`, interval 5 minutes. (The bare domain also answers now; the old 404 is gone.) Do not use the `/admin/link` URL.
+Render's free tier gives 750 instance-hours per month: enough for one always-on service per account.
+
+## 6. Sending behaviour
+- Audio/video/image files are sent as proper WhatsApp media with correct MIME types (this fixes `.opus` "unusual format" errors); everything else is a document. WhatsApp's own limits apply (documents up to 2 GB).
+- `links.telegram` / `links.drive`: show or hide each kind of link independently (env `SHOW_TELEGRAM_LINKS`, `SHOW_DRIVE_LINKS`).
+- Progress and queue: requests wait in a FIFO queue (`delivery.concurrency`, default 2; use 1 on small hosts). A status message is edited with queue position, download percent and "sending" (`delivery.progress`, `delivery.progressMinMb`). Each transfer needs temporary disk of about 2x the file size, so with several 1 GB requests keep concurrency at 1. The timeout (`delivery.timeoutSeconds`) now counts only time without progress. WhatsApp gives no upload percentage; the message shows elapsed time while sending.

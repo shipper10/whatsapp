@@ -29,6 +29,25 @@ describe("renderIndex on the real channel indexes", () => {
     expect(r.entries.map((e) => e.targetId)).toEqual([3, 4]);
   });
 
+  it("hides Drive and Telegram URLs (and lines that only carried them) when asked", () => {
+    const m = raws.find((r: { id: number }) => r.id === 4);
+    const full = renderIndex({ text: m.text, entities: m.entities, username: "BahriMed" });
+    expect(full.text).toContain("drive.google.com");
+    const hidden = renderIndex(
+      { text: m.text, entities: m.entities, username: "BahriMed" },
+      { hideUrl: (u) => /drive\.google\.com/.test(u) },
+    );
+    expect(hidden.text).not.toContain("drive.google.com");
+    expect(hidden.text).not.toContain("Google Drive Folder");
+    expect(hidden.entries).toEqual(full.entries); // numbering is untouched
+    const main = raws.find((r: { id: number }) => r.id === 2);
+    const noTg = renderIndex(
+      { text: main.text, entities: main.entities, username: "BahriMed" },
+      { hideUrl: (u) => /t\.me/.test(u) },
+    );
+    expect(noTg.text).not.toContain("t.me/");
+  });
+
   it("gives a link repeated on one line (icon + label) a single number", () => {
     const text = "6 - Gene expression\n🎙 Lecture | 📔 Sheet";
     const link = (needle: string, url: string) => ({

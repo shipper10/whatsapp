@@ -24,7 +24,10 @@ export class LinksOnlyDeliverer implements Deliverer {
   private async send(detail: Awaited<ReturnType<LibraryPort["detail"]>>, target: DeliveryTarget) {
     const lang = await this.settings.get("bot.language");
     const text = detail
-      ? formatLinksMessage(detail, lang, "not_attempted")
+      ? formatLinksMessage(detail, lang, "not_attempted", {
+          telegram: await this.settings.get("links.telegram"),
+          drive: await this.settings.get("links.drive"),
+        })
       : t("unavailable", lang);
     await this.provider.sendText({
       conversationId: target.conversationId,

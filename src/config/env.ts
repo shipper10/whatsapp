@@ -31,6 +31,9 @@ const baseSchema = z.object({
 
   // Google Drive. Per-source credentials are referenced by drive_sources.credential_ref.
   GOOGLE_SERVICE_ACCOUNT_JSON_PATH: z.string().optional(),
+  // Alternative to the path: the key itself (raw JSON, or base64 of it) - easiest to move between hosts.
+  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
 
@@ -44,6 +47,10 @@ const baseSchema = z.object({
         .map((x) => x.trim())
         .filter(Boolean),
     ),
+
+  // Public URL of this service, pinged by the keep-alive loop. Render sets RENDER_EXTERNAL_URL itself.
+  KEEPALIVE_URL: z.string().url().optional(),
+  RENDER_EXTERNAL_URL: z.string().url().optional(),
 
   TEMP_FILE_DIR: z.string().default("./tmp"),
   ENABLE_SCHEDULER: bool.default(true),

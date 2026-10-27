@@ -20,6 +20,7 @@ export interface FileFetcher {
     destDir: string,
     maxBytes: number,
     signal: AbortSignal,
+    onProgress?: (done: number, total: number | null) => void,
   ): Promise<FetchedFile>;
 }
 
@@ -27,6 +28,32 @@ export class FetchTooLargeError extends Error {
   constructor() {
     super("file exceeds the configured size limit");
   }
+}
+
+const MIME_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "audio/ogg": "ogg",
+  "audio/opus": "opus",
+  "audio/mpeg": "mp3",
+  "audio/mp4": "m4a",
+  "audio/x-m4a": "m4a",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+/** Adds the extension implied by the MIME type when a name has none (voice notes and photos have no file name). */
+export function withExtension(name: string, mime: string | null | undefined): string {
+  if (/\.[a-z0-9]{1,6}$/i.test(name)) return name;
+  const ext = mime ? MIME_EXT[mime.toLowerCase().split(";")[0]?.trim() ?? ""] : undefined;
+  return ext ? `${name}.${ext}` : name;
 }
 
 /** Safe local file name: no separators/control chars, bounded length, keeps the extension. */
@@ -63,11 +90,13 @@ export async function streamToFile(
   source: NodeJS.ReadableStream,
   path: string,
   maxBytes: number,
+  onProgress?: (done: number) => void,
 ): Promise<number> {
   let written = 0;
   const out = createWriteStream(path);
   source.on("data", (c: Buffer) => {
     written += c.length;
+    onProgress?.(written);
     if (written > maxBytes)
       (source as unknown as { destroy(e?: Error): void }).destroy(new FetchTooLargeError());
   });

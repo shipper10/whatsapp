@@ -80,11 +80,17 @@ async function linkPage(link: LinkAdmin, token: string): Promise<string> {
 export function createAppServer(deps: ServerDeps): Server {
   return createServer(async (req, res) => {
     try {
-      if (req.method === "GET" && req.url === "/healthz") {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const readOnly = req.method === "GET" || req.method === "HEAD"; // uptime monitors often use HEAD
+      if (readOnly && url.pathname === "/healthz") {
         const ok = await deps.health().catch(() => false);
         return send(res, ok ? 200 : 503, JSON.stringify({ ok }));
       }
-      const url = new URL(req.url ?? "/", "http://localhost");
+      if (readOnly && url.pathname === "/") {
+        return res
+          .writeHead(200, { "content-type": "text/plain; charset=utf-8" })
+          .end("Library bot is running.\n");
+      }
       if (deps.link && req.method === "GET" && url.pathname.startsWith("/admin/link")) {
         const bearer = req.headers.authorization?.replace(/^Bearer /i, "");
         const token = url.searchParams.get("token") ?? bearer;

@@ -2,13 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { t } from "../bot/messages.js";
 import type { LibraryPort } from "../bot/types.js";
-import { Semaphore } from "../core/concurrency.js";
+import { JobQueue } from "../core/jobQueue.js";
 import type { ResourceDetail, ResourceSourceDetail } from "../library/browse.js";
 import { cleanCaption } from "../library/indexView.js";
 import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
 import type { FileFetcher } from "./fetchers.js";
-import { formatLinksMessage } from "./links.js";
+import { formatLinksMessage, type LinkFlags, visibleLinks } from "./links.js";
 import type { Deliverer, DeliveryTarget } from "./types.js";
 
 export interface DeliveryLog {
@@ -45,9 +45,9 @@ const sanitize = (err: unknown) =>
  * confirms, always cleans temp files, never makes Drive files public.
  */
 export class FileDeliverer implements Deliverer {
-  private readonly gate: Semaphore;
+  private readonly queue: JobQueue;
   constructor(private readonly d: FileDelivererDeps) {
-    this.gate = new Semaphore(d.concurrency);
+    this.queue = new JobQueue(d.concurrency);
   }
 
   async deliver(resourceId: number, target: DeliveryTarget): Promise<void> {
@@ -65,6 +65,10 @@ export class FileDeliverer implements Deliverer {
     logId: number | null,
   ): Promise<void> {
     const lang = await this.d.settings.get("bot.language");
+    const flags: LinkFlags = {
+      telegram: await this.d.settings.get("links.telegram"),
+      drive: await this.d.settings.get("links.drive"),
+    };
     if (!detail) {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
@@ -83,7 +87,7 @@ export class FileDeliverer implements Deliverer {
       );
     if (textOnly) {
       const body = cleanCaption(detail.caption ?? "", 3500) || detail.displayName;
-      const link = detail.sources.find((s) => s.url)?.url;
+      const link = visibleLinks(detail, flags).find((l) => l.type === "telegram")?.url;
       await this.d.provider.sendText({
         conversationId: target.conversationId,
         text: link ? `${body}\n\n✈️ ${link}` : body,
@@ -96,26 +100,23 @@ export class FileDeliverer implements Deliverer {
     let status: Parameters<typeof formatLinksMessage>[2] = "not_attempted";
     let error: string | undefined;
     if (await this.d.settings.get("delivery.sendAttachment")) {
-      const driveUrls = [
-        ...new Set(
-          detail.sources.filter((x) => x.type === "google_drive" && x.url).map((x) => x.url),
-        ),
-      ];
-      const base = cleanCaption(detail.caption ?? "", 800) || detail.displayName;
-      // A sent file gets no follow-up links message, so its Drive copy is listed in the caption.
-      const caption = driveUrls.length
-        ? `${base}\n\n☁️ Google Drive: ${driveUrls.join("\n")}`
-        : base;
-      const r = await this.gate.run(() => this.tryAttachment(detail, target, caption));
+      const caption = buildCaption(detail, flags);
+      const first = detail.sources.find((x) => x.deliveryEligible);
+      target.progress?.file(first?.fileName ?? detail.displayName, first?.sizeBytes ?? null);
+      const r = await this.queue.run(
+        () => this.tryAttachment(detail, target, caption),
+        (pos) => target.progress?.queued(pos),
+      );
       status = r.status;
       error = r.error;
+      target.progress?.fileDone(status === "sent");
     }
 
     // When the file went through, it already carries its text; extra messages would only add noise.
     if (status !== "sent") {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
-        text: formatLinksMessage(detail, lang, status),
+        text: formatLinksMessage(detail, lang, status, flags),
         quoteMessageId: target.quoteMessageId,
       });
     }
@@ -162,8 +163,8 @@ export class FileDeliverer implements Deliverer {
     const typeOk = usable.filter((c) => mimeAllowed(c.src.mimeType, allowed));
     if (typeOk.length === 0) return { status: "type_blocked" };
 
-    // Only slow transfers deserve a heads-up; for small files it is just noise.
-    if ((typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
+    // Without a progress reporter, big files at least get a one-line heads-up.
+    if (!target.progress && (typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
         text: waitNotice(await this.d.settings.get("bot.language")),
@@ -175,9 +176,20 @@ export class FileDeliverer implements Deliverer {
     for (const { src, fetcher } of typeOk.slice(0, 2)) {
       const dir = await mkdtemp(join(this.d.tempDir, "dl-"));
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(new Error("timeout")), timeoutS * 1000);
+      // Stall timeout: the clock restarts whenever bytes arrive, so a big file that keeps flowing is fine.
+      let timer = setTimeout(() => ctl.abort(new Error("timeout")), timeoutS * 1000);
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => ctl.abort(new Error("timeout")), timeoutS * 1000);
+      };
       try {
-        const file = await fetcher.fetch(src, dir, maxBytes, ctl.signal);
+        target.progress?.downloading(0, src.sizeBytes);
+        const file = await fetcher.fetch(src, dir, maxBytes, ctl.signal, (done, total) => {
+          arm();
+          target.progress?.downloading(done, total ?? src.sizeBytes);
+        });
+        clearTimeout(timer);
+        target.progress?.uploading();
         const res = await this.d.provider.sendDocument({
           conversationId: target.conversationId,
           filePath: file.path,
@@ -198,6 +210,17 @@ export class FileDeliverer implements Deliverer {
     }
     return { status: "failed", error: lastError };
   }
+}
+
+/** The channel's text plus whichever source links the admin allows; a sent file gets no follow-up message. */
+export function buildCaption(detail: ResourceDetail, flags: LinkFlags): string {
+  const links = visibleLinks(detail, flags);
+  const tail = links
+    .map((l) => `${l.type === "telegram" ? "✈️ Telegram" : "☁️ Google Drive"}: ${l.url}`)
+    .join("\n");
+  const room = Math.max(0, 1000 - (tail ? tail.length + 2 : 0));
+  const base = cleanCaption(detail.caption ?? "", room) || detail.displayName.slice(0, room);
+  return tail ? `${base}\n\n${tail}` : base;
 }
 
 const waitNotice = (l: "ar" | "en") =>

@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import type {
   AnyMessageContent,
   AuthenticationState,
@@ -20,6 +21,7 @@ import type {
 } from "../types.js";
 import { useDbAuthState } from "./authState.js";
 import { extractIncoming } from "./extract.js";
+import { planMedia } from "./media.js";
 
 /** The slice of the Baileys socket this provider uses (lets tests inject a fake). */
 export interface SocketLike {
@@ -235,20 +237,36 @@ export class BaileysProvider implements WhatsAppProvider {
     }
   }
 
-  private enqueue(job: () => Promise<SendResult>): Promise<SendResult> {
-    const run = async (): Promise<SendResult> => {
+  /**
+   * Spaces the START of sends by the minimum gap, but lets them run side by side: a multi-minute upload
+   * must not hold up every other reply.
+   */
+  private async enqueue(job: () => Promise<SendResult>): Promise<SendResult> {
+    const slot = this.sendChain.then(async () => {
       const gap = await this.deps.minSendGapMs().catch(() => 0);
       const wait = this.lastSendAt + gap - Date.now();
       if (wait > 0) await this.sleep(wait);
-      try {
-        return await job();
-      } finally {
-        this.lastSendAt = Date.now();
-      }
-    };
-    const next = this.sendChain.then(run, run);
-    this.sendChain = next.catch(() => undefined);
-    return next;
+      this.lastSendAt = Date.now();
+    });
+    this.sendChain = slot.catch(() => undefined);
+    await slot;
+    return job();
+  }
+
+  /** Edits one of our own text messages (progress/status). Bypasses pacing; a few edits per ten seconds are normal. */
+  async editText(conversationId: string, messageId: string, text: string): Promise<boolean> {
+    const sock = this.sock;
+    if (!sock || this.status_.state !== "open") return false;
+    try {
+      await sock.sendMessage(conversationId, {
+        text,
+        edit: { remoteJid: conversationId, fromMe: true, id: messageId },
+      } as AnyMessageContent);
+      return true;
+    } catch (e) {
+      this.deps.logger.warn({ err: String(e) }, "editing a status message failed");
+      return false;
+    }
   }
 
   private async deliver(
@@ -277,19 +295,25 @@ export class BaileysProvider implements WhatsAppProvider {
     );
   }
 
+  /** Sends a file as the WhatsApp message kind that fits it (audio, video, image or document). */
   sendDocument(msg: OutgoingDocument): Promise<SendResult> {
-    return this.enqueue(() =>
-      this.deliver(
-        msg.conversationId,
-        {
-          document: { url: msg.filePath },
-          mimetype: msg.mimeType ?? "application/octet-stream",
-          fileName: msg.fileName,
-          caption: msg.caption,
-        },
-        msg.quoteMessageId,
-      ),
-    );
+    return this.enqueue(async () => {
+      const size = await stat(msg.filePath)
+        .then((s) => s.size)
+        .catch(() => undefined);
+      const plan = planMedia({
+        filePath: msg.filePath,
+        fileName: msg.fileName,
+        mimeType: msg.mimeType,
+        caption: msg.caption,
+        sizeBytes: size,
+      });
+      const res = await this.deliver(msg.conversationId, plan.content, msg.quoteMessageId);
+      if (res.confirmed && plan.followUpText) {
+        await this.deliver(msg.conversationId, { text: plan.followUpText }, msg.quoteMessageId);
+      }
+      return res;
+    });
   }
 
   /** For operators: wipe the stored login so the next start shows a fresh QR. */

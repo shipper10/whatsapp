@@ -1,4 +1,6 @@
 import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createAdminHook } from "./admin/commands.js";
 import { createHandler } from "./bot/handler.js";
 import { ReplyTracker } from "./bot/replyTracker.js";
@@ -11,10 +13,12 @@ import { type FileFetcher, sweepTempDir } from "./delivery/fetchers.js";
 import { FileDeliverer } from "./delivery/fileDeliverer.js";
 import { TelegramFetcher } from "./delivery/telegramFetcher.js";
 import { GoogleDriveClient, resolveCredentialPath } from "./drive/client.js";
+import { materializeGoogleCredentials } from "./drive/credentials.js";
 import { DbDriveStore } from "./drive/store.js";
 import { syncDrive } from "./drive/sync.js";
 import type { DriveClient } from "./drive/types.js";
 import { createAppServer } from "./http/server.js";
+import { startKeepAlive } from "./jobs/keepalive.js";
 import { SyncScheduler } from "./jobs/scheduler.js";
 import { classifyAndApply } from "./library/apply.js";
 import { DbLibrary } from "./library/dbLibrary.js";
@@ -28,6 +32,16 @@ import { DbTelegramStore } from "./telegram/store.js";
 import { syncTelegram } from "./telegram/sync.js";
 
 const env = loadEnv();
+{
+  const googleKeyPath = await materializeGoogleCredentials(
+    env,
+    join(tmpdir(), "library-bot-secrets"),
+  );
+  if (googleKeyPath) {
+    env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH = googleKeyPath;
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH = googleKeyPath; // used by drive_sources "default"
+  }
+}
 const log = createLogger(env.LOG_LEVEL);
 const { db, pool } = createDb(env.DATABASE_URL);
 const settings = new SettingsService(new DbSettingsStore(db));
@@ -170,7 +184,7 @@ const server = createAppServer({
         }
       : undefined,
   health: async () => {
-    await pool.query("select 1");
+    await pool.query("select count(*) from app_settings"); // a real table read, not just a ping
     return true;
   },
   logger: log,
@@ -184,6 +198,12 @@ if (baileys) {
   log.info({}, "WhatsApp (Baileys) starting; open /admin/link?token=... to link if not linked yet");
 }
 if (env.ENABLE_SCHEDULER) scheduler.start();
+const keepAlive = startKeepAlive({
+  url: env.KEEPALIVE_URL ?? env.RENDER_EXTERNAL_URL,
+  touchDb: async () => void (await pool.query("select count(*) from app_settings")),
+  intervalMinutes: () => settings.get("keepalive.intervalMinutes"),
+  logger: log,
+});
 
 const maintenance = setInterval(async () => {
   handler.prune();
@@ -203,6 +223,7 @@ await sweepTempDir(env.TEMP_FILE_DIR, 0).catch(() => undefined); // nothing surv
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     clearInterval(maintenance);
+    keepAlive.stop();
     scheduler.stop();
     server.close();
     void Promise.allSettled([baileys?.stop(), telegram?.close(), pool.end()]).then(() =>

@@ -7,6 +7,7 @@ import {
   resources,
   telegramMessages,
 } from "../db/schema.js";
+import { withExtension } from "../delivery/fetchers.js";
 import type { RawEntity } from "../telegram/types.js";
 import { type IndexTitle, indexTitle } from "./indexSearch.js";
 import { cleanCaption } from "./indexView.js";
@@ -255,14 +256,6 @@ export async function messageKinds(db: Db, ids: number[]): Promise<Map<number, M
   return out;
 }
 
-const EXT: Record<string, string> = {
-  "application/pdf": "pdf",
-  "video/mp4": "mp4",
-  "audio/mpeg": "mp3",
-  "audio/ogg": "ogg",
-  "image/jpeg": "jpg",
-};
-
 /** Delivery details for any synced Telegram message, whether or not the classifier made a resource of it. */
 export async function telegramMessageDetail(
   db: Db,
@@ -285,9 +278,9 @@ export async function telegramMessageDetail(
     .limit(1);
   const caption = m.textOrCaption ? cleanCaption(m.textOrCaption) : "";
   const mime = m.mimeType ?? (m.mediaType === "photo" ? "image/jpeg" : null);
-  const fileName =
-    m.fileName ??
-    (m.mediaType ? `${m.mediaType}-${m.messageId}.${EXT[mime ?? ""] ?? "bin"}` : null);
+  const fileName = m.mediaType
+    ? withExtension(m.fileName ?? `${m.mediaType}-${m.messageId}`, mime)
+    : null;
   const title = caption.split("\n").find((l) => l.trim()) ?? m.fileName ?? `#${m.messageId}`;
   // Drive copies live on the resource this message was merged into; they must not be lost on this path.
   const driveCopies = rs

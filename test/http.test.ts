@@ -69,6 +69,18 @@ describe("http server", () => {
   });
 });
 
+describe("uptime monitor endpoints", () => {
+  it("answers GET and HEAD on / and /healthz with 200 (monitors cannot read a 404)", async () => {
+    const { url } = await start();
+    for (const path of ["/", "/healthz", "/healthz?x=1"]) {
+      for (const method of ["GET", "HEAD"]) {
+        expect((await fetch(`${url}${path}`, { method })).status).toBe(200);
+      }
+    }
+    expect((await fetch(`${url}/nope`)).status).toBe(404);
+  });
+});
+
 describe("lite-mode link admin", () => {
   async function startLink(state: { state: string; qr?: string }) {
     const server = createAppServer({

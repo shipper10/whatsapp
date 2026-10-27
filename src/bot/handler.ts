@@ -2,6 +2,7 @@ import { Deduper, KeyedMutex, RateLimiter } from "../core/concurrency.js";
 import { normalizeText } from "../core/normalize/arabic.js";
 import { MissingParticipantError, sessionKeyFor, sessionKeyString } from "../core/session/key.js";
 import type { SessionStore } from "../core/session/store.js";
+import { WhatsAppProgress } from "../delivery/progress.js";
 import type { Deliverer } from "../delivery/types.js";
 import type { IncomingMessage, WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
@@ -87,6 +88,8 @@ export function createHandler(deps: HandlerDeps) {
       rootIndexId,
       maxBatch,
       aliases,
+      showTelegram,
+      showDrive,
     ] = await Promise.all([
       deps.settings.get("bot.language"),
       deps.settings.get("search.pageSize"),
@@ -101,6 +104,8 @@ export function createHandler(deps: HandlerDeps) {
       deps.settings.get("library.rootIndexMessageId"),
       deps.settings.get("delivery.maxBatch"),
       deps.settings.get("library.indexAliases"),
+      deps.settings.get("links.telegram"),
+      deps.settings.get("links.drive"),
     ]);
     const cfg: BotConfig = {
       pageSize,
@@ -111,6 +116,7 @@ export function createHandler(deps: HandlerDeps) {
       rootIndexId,
       maxBatch,
       aliases,
+      showLinks: { telegram: showTelegram, drive: showDrive },
     };
 
     if (msg.isGroup && groupMode === "disabled") return;
@@ -167,8 +173,30 @@ export function createHandler(deps: HandlerDeps) {
           conversationId: msg.conversationId,
           quoteMessageId: msg.isGroup ? msg.messageId : undefined,
         };
-        for (const id of turn.deliver.resources) await deps.deliverer.deliver(id, target);
-        for (const id of turn.deliver.messages) await deps.deliverer.deliverMessage(id, target);
+        const total = turn.deliver.resources.length + turn.deliver.messages.length;
+        const [showProgress, minMb] = await Promise.all([
+          deps.settings.get("delivery.progress"),
+          deps.settings.get("delivery.progressMinMb"),
+        ]);
+        const sink = showProgress
+          ? new WhatsAppProgress({
+              provider: deps.provider,
+              conversationId: msg.conversationId,
+              quoteMessageId: target.quoteMessageId,
+              lang,
+              minBytes: minMb * 1024 * 1024,
+            })
+          : undefined;
+        if (sink) await sink.begin(total);
+        else if (total > 1) await reply(msg, t("sendingMany", lang).replace("{n}", String(total)));
+        const withProgress = { ...target, progress: sink };
+        try {
+          for (const id of turn.deliver.resources) await deps.deliverer.deliver(id, withProgress);
+          for (const id of turn.deliver.messages)
+            await deps.deliverer.deliverMessage(id, withProgress);
+        } finally {
+          await sink?.end();
+        }
       }
     });
   }

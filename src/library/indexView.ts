@@ -48,7 +48,10 @@ export const marker = (n: number) => `【${n}】`;
  * Turns a Telegram index message into WhatsApp text where every link to a channel message carries a
  * number the user can send back, and returns what each number points to. Pure; no I/O.
  */
-export function renderIndex(src: IndexSource): RenderedIndex {
+export function renderIndex(
+  src: IndexSource,
+  opts: { hideUrl?: (url: string) => boolean } = {},
+): RenderedIndex {
   const linkRe = new RegExp(
     `^https?://t\\.me/${src.username ? escapeRe(src.username) : "[A-Za-z0-9_]+"}/(\\d+)(?:\\?.*)?$`,
     "i",
@@ -94,6 +97,8 @@ export function renderIndex(src: IndexSource): RenderedIndex {
     let text = "";
     let cursor = start;
     const numbered = new Set<number>();
+    let shown = 0;
+    let hidden = 0;
     for (const e of here) {
       const eEnd = Math.min(e.offset + e.length, end);
       const label = src.text.slice(e.offset, eEnd);
@@ -102,9 +107,11 @@ export function renderIndex(src: IndexSource): RenderedIndex {
       const url = e.url as string;
       const id = linkRe.exec(url)?.[1];
       if (!id) {
-        if (url.trim() !== label.trim()) text += ` ${url}`;
+        if (opts.hideUrl?.(url)) hidden++;
+        else if (url.trim() !== label.trim()) text += ` ${url}`;
         continue;
       }
+      shown++;
       const target = Number(id);
       let entry = byTarget.get(target);
       const kind = kindOf(label);
@@ -128,6 +135,8 @@ export function renderIndex(src: IndexSource): RenderedIndex {
       }
     }
     text += src.text.slice(cursor, end);
+    // a line that only existed to carry a hidden link ("☁️ Google Drive Folder") disappears with it
+    if (hidden > 0 && shown === 0) continue;
     out.push(text);
   }
 

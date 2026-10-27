@@ -1,4 +1,8 @@
+import type { ProgressSink } from "./progress.js";
+
 export interface DeliveryTarget {
+  /** Receives queue position, download percent and send status for this request. */
+  progress?: ProgressSink;
   conversationId: string;
   /** Provider id of the message to quote (set in groups). */
   quoteMessageId?: string;

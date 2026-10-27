@@ -108,6 +108,46 @@ export const settingsRegistry = {
     restart: false,
     description: "Allowed MIME prefixes/types for attachments. Empty = allow all.",
   }),
+  "keepalive.intervalMinutes": def({
+    schema: z.coerce.number().int().min(0).max(60),
+    default: 10,
+    envName: "KEEPALIVE_INTERVAL_MINUTES",
+    restart: false,
+    description:
+      "Every N minutes the bot reads its database (keeps free Postgres from pausing) and, if a public URL is known, requests its own /healthz (keeps free hosts awake). 0 = off.",
+  }),
+  "links.telegram": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "SHOW_TELEGRAM_LINKS",
+    restart: false,
+    description:
+      "Show Telegram links (in file captions, fallback messages, text posts and the index text). false = hide them everywhere.",
+  }),
+  "links.drive": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "SHOW_DRIVE_LINKS",
+    restart: false,
+    description:
+      "Show Google Drive links (in file captions, fallback messages and the index text). false = hide them everywhere.",
+  }),
+  "delivery.progress": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "DELIVERY_PROGRESS",
+    restart: false,
+    description:
+      "Show a status message (queue position, download percent, sending) that is edited as a request proceeds.",
+  }),
+  "delivery.progressMinMb": def({
+    schema: z.coerce.number().int().min(0).max(2000),
+    default: 5,
+    envName: "DELIVERY_PROGRESS_MIN_MB",
+    restart: false,
+    description:
+      "A single file smaller than this shows no status message (unless it had to wait in line). Requests with several files always show one.",
+  }),
   "delivery.maxBatch": def({
     schema: z.coerce.number().int().min(1).max(50),
     default: 15,
@@ -171,7 +211,8 @@ export const settingsRegistry = {
     default: 120,
     envName: "DELIVERY_TIMEOUT_SECONDS",
     restart: false,
-    description: "Max time to download + send one file before falling back to links.",
+    description:
+      "Seconds without any download progress before giving up on a file and falling back to links (the clock restarts whenever bytes arrive).",
   }),
   "delivery.driveDownload": def({
     schema: z.boolean(),
