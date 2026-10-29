@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { t } from "../bot/messages.js";
 import type { LibraryPort } from "../bot/types.js";
 import { JobQueue } from "../core/jobQueue.js";
@@ -7,6 +7,7 @@ import type { ResourceDetail, ResourceSourceDetail } from "../library/browse.js"
 import { cleanCaption } from "../library/indexView.js";
 import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
+import { AUDIO_INLINE_MAX, looksLikeAudio, splitAudio } from "./audioSplit.js";
 import type { FileFetcher } from "./fetchers.js";
 import { formatLinksMessage, type LinkFlags, visibleLinks } from "./links.js";
 import { typeAllowed } from "./typeFilter.js";
@@ -132,12 +133,14 @@ export class FileDeliverer implements Deliverer {
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
   }> {
-    const [maxMb, allowed, timeoutS, driveOn, audioMode] = await Promise.all([
+    const [maxMb, allowed, timeoutS, driveOn, audioMode, splitAudioOn, lang] = await Promise.all([
       this.d.settings.get("delivery.maxAttachmentMb"),
       this.d.settings.get("delivery.allowedMediaTypes"),
       this.d.settings.get("delivery.timeoutSeconds"),
       this.d.settings.get("delivery.driveDownload"),
       this.d.settings.get("delivery.audioMode"),
+      this.d.settings.get("delivery.splitLargeAudio"),
+      this.d.settings.get("bot.language"),
     ]);
     const maxBytes = maxMb * 1024 * 1024;
 
@@ -159,6 +162,17 @@ export class FileDeliverer implements Deliverer {
     if (usable.length === 0) return { status: "too_large" };
     const typeOk = usable.filter((c) => typeAllowed(c.src.mimeType, c.src.fileName, allowed));
     if (typeOk.length === 0) return { status: "type_blocked" };
+
+    // Audio over WhatsApp's 16 MB limit cannot be opened by the recipient: split it, or give links only.
+    if (
+      !splitAudioOn &&
+      typeOk.every(
+        (c) =>
+          looksLikeAudio(c.src.mimeType, c.src.fileName ?? "") &&
+          (c.src.sizeBytes ?? 0) > AUDIO_INLINE_MAX,
+      )
+    )
+      return { status: "too_large" };
 
     // Without a progress reporter, big files at least get a one-line heads-up.
     if (!target.progress && (typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
@@ -186,6 +200,10 @@ export class FileDeliverer implements Deliverer {
           target.progress?.downloading(done, total ?? src.sizeBytes);
         });
         clearTimeout(timer);
+        if (looksLikeAudio(file.mimeType, file.fileName) && file.sizeBytes > AUDIO_INLINE_MAX) {
+          if (!splitAudioOn) return { status: "too_large" };
+          return await this.sendAudioParts(file, dir, caption, target, audioMode, lang);
+        }
         await target.progress?.uploading();
         const res = await this.d.provider.sendDocument({
           conversationId: target.conversationId,
@@ -208,7 +226,47 @@ export class FileDeliverer implements Deliverer {
     }
     return { status: "failed", error: lastError };
   }
+
+  /** Audio over the inline limit: an explanation, then the parts in order (cut without re-encoding). */
+  private async sendAudioParts(
+    file: { path: string; fileName: string; mimeType: string },
+    dir: string,
+    caption: string,
+    target: DeliveryTarget,
+    audioMode: "audio" | "document",
+    lang: "ar" | "en",
+  ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
+    const split = await splitAudio(file.path, file.fileName, dir).catch(() => null);
+    if (!split) return { status: "too_large" };
+    const n = split.files.length;
+    await this.d.provider.sendText({
+      conversationId: target.conversationId,
+      text: `${caption}\n\n${splitNotice(lang, n)}`,
+      quoteMessageId: target.quoteMessageId,
+    });
+    for (const [i, path] of split.files.entries()) {
+      await target.progress?.uploading();
+      const res = await this.d.provider.sendDocument({
+        conversationId: target.conversationId,
+        filePath: path,
+        fileName: basename(path),
+        mimeType: file.mimeType,
+        caption: partLabel(lang, i + 1, n),
+        quoteMessageId: target.quoteMessageId,
+        audioAsDocument: audioMode === "document",
+      });
+      if (!res.confirmed) return { status: "failed", error: res.error ?? "SendNotConfirmed" };
+    }
+    return { status: "sent" };
+  }
 }
+
+const splitNotice = (l: "ar" | "en", n: number) =>
+  l === "ar"
+    ? `✂️ هذا المقطع أكبر من حد واتساب للصوت (16 ميغابايت)، فأُرسل مقسومًا إلى ${n} أجزاء بالترتيب. للحصول عليه كاملًا في ملف واحد استخدم الروابط أعلاه.`
+    : `✂️ This audio is over WhatsApp's 16 MB limit, so it is sent as ${n} parts in order. For the full file in one piece use the links above.`;
+const partLabel = (l: "ar" | "en", i: number, n: number) =>
+  l === "ar" ? `🎧 الجزء ${i} من ${n}` : `🎧 Part ${i} of ${n}`;
 
 /** The channel's text plus whichever source links the admin allows; a sent file gets no follow-up message. */
 export function buildCaption(detail: ResourceDetail, flags: LinkFlags): string {

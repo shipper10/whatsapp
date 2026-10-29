@@ -118,6 +118,14 @@ export const settingsRegistry = {
     description:
       "audio = sound files arrive as playable WhatsApp audio messages; document = as attachments (use if audio messages fail on your recipients' phones).",
   }),
+  "delivery.splitLargeAudio": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "DELIVERY_SPLIT_AUDIO",
+    restart: false,
+    description:
+      "Audio over 16 MB (WhatsApp's limit) is sent as ordered parts, cut without re-encoding. false = links only for such files.",
+  }),
   "keepalive.intervalMinutes": def({
     schema: z.coerce.number().int().min(0).max(60),
     default: 10,
