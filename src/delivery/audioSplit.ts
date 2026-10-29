@@ -81,7 +81,32 @@ function rebaseOgg(data: Buffer, firstSeq: number, baseGranule: bigint): Buffer 
   return out;
 }
 
-type Ranges = { prefix?: Buffer; from: number; to: number; baseGranule?: bigint }[];
+/** A tiny, valid OpusTags page (no comments, no cover art) to replace oversized ones. */
+function minimalTagsPage(serial: number): Buffer {
+  const vendor = Buffer.from("library-bot");
+  const body = Buffer.alloc(8 + 4 + vendor.length + 4);
+  body.write("OpusTags", 0, "latin1");
+  body.writeUInt32LE(vendor.length, 8);
+  vendor.copy(body, 12);
+  const page = Buffer.alloc(28 + body.length);
+  page.write("OggS", 0, "latin1");
+  page.writeUInt32LE(serial, 14);
+  page.writeUInt32LE(1, 18);
+  page[26] = 1;
+  page[27] = body.length;
+  body.copy(page, 28);
+  page.writeUInt32LE(oggCrc(page), 22);
+  return page;
+}
+
+type Ranges = {
+  prefix?: Buffer;
+  from: number;
+  to: number;
+  baseGranule?: bigint;
+  /** true when an oversized tags block was replaced */
+  cleaned?: boolean;
+}[];
 
 /** Byte-sync formats (mp3 / aac): cut just before a frame header near the size limit. */
 async function plainRanges(
@@ -118,7 +143,12 @@ async function plainRanges(
 }
 
 /** Ogg: every part gets the original header pages, and is cut only on page boundaries. */
-async function oggRanges(fh: FileHandle, size: number, max: number): Promise<Ranges | null> {
+async function oggRanges(
+  fh: FileHandle,
+  size: number,
+  max: number,
+  opts?: { forceSingle?: boolean },
+): Promise<Ranges | null> {
   const pages: { pos: number; len: number; granule: bigint; continued: boolean }[] = [];
   let pos = 0;
   while (pos + 27 <= size) {
@@ -136,8 +166,17 @@ async function oggRanges(fh: FileHandle, size: number, max: number): Promise<Ran
   if (hdrEnd === 0 || hdrEnd >= pages.length) return null;
   const first = pages[0] as (typeof pages)[number];
   const last = pages[hdrEnd - 1] as (typeof pages)[number];
-  const headerLen = last.pos + last.len - first.pos;
-  const prefix = await readAt(fh, 0, headerLen);
+  const originalHeaderLen = last.pos + last.len - first.pos;
+  let prefix = await readAt(fh, 0, originalHeaderLen);
+  // Opus files from some tools carry the lecture's cover picture inside the tags (megabytes of it);
+  // WhatsApp then reports "audio is not available". Keep the identification page, replace the tags.
+  if (prefix.includes("OpusHead") && originalHeaderLen > 4096 && hdrEnd >= 2) {
+    const idPage = prefix.subarray(0, first.len);
+    prefix = Buffer.concat([idPage, minimalTagsPage(prefix.readUInt32LE(14))]);
+  }
+  const cleaned = prefix.length < originalHeaderLen;
+  const headerLen = prefix.length;
+  if (opts?.forceSingle) max = Number.MAX_SAFE_INTEGER;
   const out: Ranges = [];
   let start = (pages[hdrEnd] as (typeof pages)[number]).pos;
   let acc = headerLen;
@@ -147,7 +186,7 @@ async function oggRanges(fh: FileHandle, size: number, max: number): Promise<Ran
   for (let i = hdrEnd; i < pages.length; i++) {
     const p = pages[i] as (typeof pages)[number];
     if (acc + p.len > max && !p.continued && p.pos > start) {
-      out.push({ prefix, from: start, to: p.pos, baseGranule: base });
+      out.push({ prefix, from: start, to: p.pos, baseGranule: base, cleaned });
       base = lastGranule;
       start = p.pos;
       acc = headerLen;
@@ -156,7 +195,7 @@ async function oggRanges(fh: FileHandle, size: number, max: number): Promise<Ran
     cur = p.pos + p.len;
     if (p.granule > 0n) lastGranule = p.granule;
   }
-  out.push({ prefix, from: start, to: cur, baseGranule: base });
+  out.push({ prefix, from: start, to: cur, baseGranule: base, cleaned });
   return out;
 }
 
@@ -254,6 +293,31 @@ export async function splitAudio(
       files.push(f);
     }
     return { files, ext };
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * For Ogg/Opus files whose tags block is huge (embedded cover art), returns a copy with a minimal tags block,
+ * otherwise null. Copies bytes only; no re-encoding.
+ */
+export async function cleanOggHeader(
+  path: string,
+  fileName: string,
+  dir: string,
+): Promise<string | null> {
+  const fh = await open(path, "r");
+  try {
+    const size = (await stat(path)).size;
+    if (audioFormat(fileName, await readAt(fh, 0, 4096)) !== "ogg") return null;
+    const ranges = await oggRanges(fh, size, Number.MAX_SAFE_INTEGER, { forceSingle: true });
+    const r = ranges?.[0];
+    if (!r?.prefix || !r.cleaned) return null; // nothing oversized to remove
+    const body = rebaseOgg(await readAt(fh, r.from, r.to - r.from), 2, 0n);
+    const out = join(dir, "clean.ogg");
+    await writeFile(out, Buffer.concat([r.prefix, body]));
+    return out;
   } finally {
     await fh.close();
   }

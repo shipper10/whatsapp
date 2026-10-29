@@ -104,3 +104,37 @@ describe("splitAudio", () => {
     expect(audioFormat("x.bin", Buffer.alloc(16))).toBeNull();
   });
 });
+
+describe("cover art in Opus tags", () => {
+  it("replaces an oversized tags block in parts and in single files", async () => {
+    const { cleanOggHeader } = await import("../src/delivery/audioSplit.js");
+    const d = await dir();
+    const idPage = oggPage(0, 0n, Buffer.from("OpusHead".padEnd(19, "x")), 2);
+    const bigTags = Buffer.alloc(6000, 126);
+    bigTags.write("OpusTags", 0, "latin1");
+    // tags spread over 30 pages of 200 bytes, as a real cover-art block is
+    const tagPages = Array.from({ length: 30 }, (_, i) =>
+      oggPage(1 + i, 0n, bigTags.subarray(i * 200, i * 200 + 200), i ? 1 : 0),
+    );
+    const data = Array.from({ length: 40 }, (_, i) =>
+      oggPage(31 + i, BigInt((i + 1) * 960), Buffer.alloc(200, i)),
+    );
+    const src = join(d, "c.opus");
+    await writeFile(src, Buffer.concat([idPage, ...tagPages, ...data]));
+    const clean = await cleanOggHeader(src, "c.opus", d);
+    expect(clean).not.toBeNull();
+    const cb = await readFile(clean as string);
+    expect(cb.length).toBeLessThan(40 * 228 + 500);
+    expect(cb.includes(Buffer.alloc(100, 126))).toBe(false);
+    const parts = await splitAudio(src, "c.opus", d, 4000);
+    for (const f of parts?.files ?? [])
+      expect((await readFile(f)).includes(Buffer.alloc(100, 126))).toBe(false);
+    // a file with a normal small header is left alone
+    const small = join(d, "s.opus");
+    await writeFile(
+      small,
+      Buffer.concat([idPage, oggPage(1, 0n, Buffer.from("OpusTags")), ...data]),
+    );
+    expect(await cleanOggHeader(small, "s.opus", d)).toBeNull();
+  });
+});
