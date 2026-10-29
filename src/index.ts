@@ -124,6 +124,7 @@ const channelUsername = async () => {
   return (await telegram?.identity())?.username ?? "";
 };
 
+const syncNotes = new Map<string, string>();
 const scheduler = new SyncScheduler({
   logger: log,
   intervalMinutes: (kind) =>
@@ -135,6 +136,8 @@ const scheduler = new SyncScheduler({
       if (!telegram) throw new Error("Telegram is not configured");
       const id = await telegram.identity();
       return syncTelegram(telegram, new DbTelegramStore(db), {
+        onProgress: (st) =>
+          syncNotes.set("telegram", `${st.fetched} messages read, ${st.inserted} new`),
         sourceKey: String(id.chatId),
         ctx: { chatId: id.chatId, username: id.username },
         rescanWindow: await settings.get("sync.telegram.rescanWindow"),
@@ -142,6 +145,7 @@ const scheduler = new SyncScheduler({
     },
     drive: async () => syncDrive(new DbDriveStore(db), (s) => driveClientFor(s.credentialRef)),
   },
+  note: (kind) => syncNotes.get(kind),
   classify: async () => classifyAndApply(db, await channelUsername()),
 });
 

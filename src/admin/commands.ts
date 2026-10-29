@@ -26,7 +26,7 @@ import { idDigits, sameIdentity } from "./identity.js";
 export interface AdminDeps {
   db: Db;
   settings: SettingsService;
-  scheduler: Pick<SyncScheduler, "runNow" | "last" | "staleKinds">;
+  scheduler: Pick<SyncScheduler, "runNow" | "last" | "staleKinds" | "activity">;
   bootstrapAdmins: string[];
   send: (msg: IncomingMessage, text: string) => Promise<void>;
 }
@@ -81,7 +81,13 @@ function parseValue(key: SettingKey, raw: string): unknown {
 }
 
 /** Runs one admin command and returns the reply text. Throws only for programmer errors. */
-export async function runCommand(d: AdminDeps, actor: string, line: string): Promise<string> {
+export async function runCommand(
+  d: AdminDeps,
+  actor: string,
+  line: string,
+  /** Sends a later message to the same chat (for work that finishes after the first reply). */
+  notify?: (text: string) => Promise<void>,
+): Promise<string> {
   const [cmd = "", ...args] = line.trim().split(/\s+/);
   const rest = line.trim().slice(cmd.length).trim();
   const audit = (action: string, detail: object = {}) =>
@@ -97,6 +103,12 @@ export async function runCommand(d: AdminDeps, actor: string, line: string): Pro
         const r = d.scheduler.last.get(kind);
         lines.push(
           `• ${kind}: ${r ? `${r.ok ? "✅" : "❌"} ${ago(r.finishedAt)}${r.error ? ` — ${clip(r.error, 80)}` : ""}` : "no run since start"}`,
+        );
+      }
+      for (const a of d.scheduler.activity()) {
+        const mins = Math.max(0, Math.round((Date.now() - a.since.getTime()) / 60000));
+        lines.push(
+          `⏳ ${a.kind} running ${mins} min — ${a.phase === "classify" ? "organizing the library" : (a.note ?? "reading")}`,
         );
       }
       const stale = await d.scheduler.staleKinds();
@@ -176,10 +188,19 @@ export async function runCommand(d: AdminDeps, actor: string, line: string): Pro
       await audit("sync", { which });
       const kinds =
         which === "all" ? (["telegram", "drive"] as const) : ([which] as ("telegram" | "drive")[]);
-      const reports = await Promise.all(kinds.map((k) => d.scheduler.runNow(k)));
-      return reports
-        .map((r) => `${r.kind}: ${r.ok ? "✅ done" : `❌ ${clip(r.error ?? "failed", 150)}`}`)
-        .join("\n");
+      const already = d.scheduler.activity().filter((a) => kinds.includes(a.kind as never));
+      const started = Date.now();
+      // Runs in the background: the chat stays responsive and the result arrives as its own message.
+      void Promise.all(kinds.map((k) => d.scheduler.runNow(k))).then(async (reports) => {
+        const mins = Math.max(1, Math.round((Date.now() - started) / 60000));
+        const text = reports
+          .map((r) => `${r.kind}: ${r.ok ? "✅ done" : `❌ ${clip(r.error ?? "failed", 150)}`}`)
+          .join("\n");
+        await notify?.(`${text}\n(${mins} min)`).catch(() => undefined);
+      });
+      return already.length
+        ? `⏳ ${already.map((a) => a.kind).join(", ")} already running; I'll message you when it finishes. /status shows progress.`
+        : `⏳ Sync started (${kinds.join(" + ")}). I'll message you when it finishes; /status shows progress and other commands still work.`;
     }
 
     case "/settings": {
@@ -482,7 +503,7 @@ export function createAdminHook(d: AdminDeps) {
     if (!(await isAdmin(d, msg.participantId))) return false; // non-admins just get a normal search
     let reply: string;
     try {
-      reply = await runCommand(d, msg.participantId, text);
+      reply = await runCommand(d, msg.participantId, text, (t) => d.send(msg, t));
     } catch (e) {
       reply = `❌ Command failed: ${(e as Error).name}`;
     }

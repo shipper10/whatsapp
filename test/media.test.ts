@@ -15,12 +15,14 @@ describe("planMedia", () => {
       ptt: false,
     });
     expect(p.followUpText).toBe("cap");
-    // Ogg/Opus travels as an attachment named .ogg (inline opus showed "audio not available")
-    expect(plan("lecture.opus", 5_000_000).kind).toBe("document");
-    expect(plan("lecture.opus", 5_000_000).content).toMatchObject({
+    expect(plan("lecture.opus", 5_000_000).kind).toBe("audio");
+    // over 16 MB WhatsApp cannot play it inline: attachment named .ogg
+    expect(plan("lecture.opus", 20_000_000).kind).toBe("document");
+    expect(plan("lecture.opus", 20_000_000).content).toMatchObject({
       fileName: "lecture.ogg",
       mimetype: "audio/ogg",
     });
+    expect(plan("lecture.mp3", 20_000_000).kind).toBe("document");
     expect(plan("a.mp3").content).toMatchObject({ mimetype: "audio/mpeg" });
     expect(plan("a.m4a").content).toMatchObject({ mimetype: "audio/mp4" });
   });
@@ -88,8 +90,8 @@ describe("audio sniffing", () => {
   });
   it("detects opus by its bytes even when the name lies", () => {
     const p = planMedia({ filePath: "/t/a.bin", fileName: "a.bin", sizeBytes: 1000, head: ogg });
-    expect(p.kind).toBe("document");
-    expect(p.content).toMatchObject({ fileName: "a.ogg", mimetype: "audio/ogg" });
+    expect(p.kind).toBe("audio");
+    expect(p.content).toMatchObject({ mimetype: "audio/ogg; codecs=opus" });
   });
   it("audioAsDocument sends a renamed .ogg attachment", () => {
     const p = planMedia({

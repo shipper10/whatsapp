@@ -20,6 +20,7 @@ beforeAll(async () => {
     settings: new SettingsService(new MemSettings(), {}, 0),
     scheduler: {
       last,
+      activity: () => [],
       runNow: async (k) => {
         ran.push(k);
         const r: JobReport = {
@@ -58,10 +59,13 @@ describe("admin commands", () => {
     expect(await run("/stats")).toMatch(/Resources: \d+ \(.*classified/);
   });
 
-  it("sync now reports per-kind outcomes", async () => {
-    const out = await run("/sync all");
-    expect(out).toContain("telegram: ✅");
-    expect(out).toContain("drive: ❌ folder not shared");
+  it("sync now replies at once and reports per-kind outcomes in a later message", async () => {
+    const later: string[] = [];
+    const out = await runCommand(deps, ADMIN, "/sync all", async (t) => void later.push(t));
+    expect(out).toContain("started");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(later[0]).toContain("telegram: ✅");
+    expect(later[0]).toContain("drive: ❌ folder not shared");
     expect(ran).toEqual(["telegram", "drive"]);
     expect(await run("/sync nope")).toContain("Usage");
   });

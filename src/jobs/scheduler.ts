@@ -11,6 +11,8 @@ export interface JobDeps {
     warn: (o: object, m?: string) => void;
     error: (o: object, m?: string) => void;
   };
+  /** Free-text progress of a running job (e.g. "1200 messages read"), shown by /status. */
+  note?: (kind: JobKind) => string | undefined;
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
@@ -35,6 +37,8 @@ export class SyncScheduler {
   private running = new Map<JobKind, Promise<JobReport>>();
   private classifyChain: Promise<unknown> = Promise.resolve();
   readonly last = new Map<JobKind, JobReport>();
+  private startedAt = new Map<JobKind, Date>();
+  private phase = new Map<JobKind, "sync" | "classify">();
   private timers = new Set<NodeJS.Timeout>();
 
   constructor(private readonly d: JobDeps) {}
@@ -52,8 +56,11 @@ export class SyncScheduler {
     const now = this.d.now ?? (() => new Date());
     const startedAt = now();
     const report: JobReport = { kind, ok: false, startedAt, finishedAt: startedAt };
+    this.startedAt.set(kind, startedAt);
+    this.phase.set(kind, "sync");
     try {
       report.summary = await this.d.run[kind]();
+      this.phase.set(kind, "classify");
       const job = this.classifyChain.then(() => this.d.classify());
       this.classifyChain = job.catch(() => undefined);
       report.classified = await job;
@@ -64,8 +71,20 @@ export class SyncScheduler {
       this.d.logger.error({ kind, error: report.error }, "sync failed");
     }
     report.finishedAt = now();
+    this.startedAt.delete(kind);
+    this.phase.delete(kind);
     this.last.set(kind, report);
     return report;
+  }
+
+  /** Jobs running right now, for status displays. */
+  activity(): { kind: JobKind; since: Date; phase: "sync" | "classify"; note?: string }[] {
+    return [...this.startedAt].map(([kind, since]) => ({
+      kind,
+      since,
+      phase: this.phase.get(kind) ?? "sync",
+      note: this.d.note?.(kind),
+    }));
   }
 
   start(initialDelayMs = 5_000) {

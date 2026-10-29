@@ -12,6 +12,8 @@ export interface SyncOptions {
   rescanWindow?: number;
   maxRetries?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Called after every batch so callers can show progress. */
+  onProgress?: (stats: SyncStats) => void;
 }
 
 export interface SyncStats {
@@ -66,6 +68,7 @@ export async function syncTelegram(
         stats.inserted += res.inserted;
         stats.updated += res.updated;
       }
+      opts.onProgress?.({ ...stats });
       // The cursor follows the window, not the stored messages: ids with no message must not stall us.
       cursor = Math.max(cursor, batch.lastId);
       await store.setCursor(opts.sourceKey, cursor);

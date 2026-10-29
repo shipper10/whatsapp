@@ -62,11 +62,10 @@ const DOCUMENT: Record<string, string> = {
 };
 
 /**
- * Largest sizes sent as an inline audio / video / image message; bigger ones go as documents.
- * (The 16 MB / 5 MB figures in Meta's docs are for the business Cloud API; the normal app is looser, but
- * images stay small because WhatsApp recompresses them.)
+ * Largest sizes WhatsApp opens as an inline audio / video / image message; anything bigger MUST go as a
+ * document, otherwise the recipient sees "audio is not available" (16 MB audio/video, 5 MB images).
  */
-const LIMIT = { audio: 64 * 1024 * 1024, video: 64 * 1024 * 1024, image: 5 * 1024 * 1024 };
+const LIMIT = { audio: 16 * 1024 * 1024, video: 16 * 1024 * 1024, image: 5 * 1024 * 1024 };
 
 export type SniffedAudio = "ogg-opus" | "ogg-other" | "mp3" | "aac" | "m4a" | "amr" | "wav" | null;
 
@@ -115,9 +114,7 @@ export function planMedia(m: MediaInput): MediaPlan {
     sniffed && sniffed in SNIFF_AUDIO_MIME
       ? SNIFF_AUDIO_MIME[sniffed as keyof typeof SNIFF_AUDIO_MIME]
       : undefined;
-  const oggFamily = ext === "ogg";
   const inlineAudio =
-    !oggFamily && // Ogg/Opus as an inline audio message showed "audio not available"; the attachment opens fine
     (sniffed ? audioMime !== undefined : AUDIO[ext] !== undefined) &&
     size <= LIMIT.audio &&
     !m.audioAsDocument;
