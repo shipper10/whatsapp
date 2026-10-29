@@ -115,7 +115,9 @@ export function planMedia(m: MediaInput): MediaPlan {
     sniffed && sniffed in SNIFF_AUDIO_MIME
       ? SNIFF_AUDIO_MIME[sniffed as keyof typeof SNIFF_AUDIO_MIME]
       : undefined;
+  const oggFamily = ext === "ogg";
   const inlineAudio =
+    !oggFamily && // Ogg/Opus as an inline audio message showed "audio not available"; the attachment opens fine
     (sniffed ? audioMime !== undefined : AUDIO[ext] !== undefined) &&
     size <= LIMIT.audio &&
     !m.audioAsDocument;

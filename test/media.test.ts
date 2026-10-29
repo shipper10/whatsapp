@@ -7,14 +7,20 @@ const plan = (fileName: string, sizeBytes = 1000, mimeType?: string) =>
 
 describe("planMedia", () => {
   it("sends opus/ogg/mp3/m4a as audio messages with a type WhatsApp accepts, caption as follow-up text", () => {
-    const p = plan("lecture.opus", 5_000_000, "application/octet-stream");
+    const p = plan("lecture.mp3", 5_000_000, "application/octet-stream");
     expect(p.kind).toBe("audio");
     expect(p.content).toMatchObject({
-      audio: { url: "/tmp/x/lecture.opus" },
-      mimetype: "audio/ogg; codecs=opus",
+      audio: { url: "/tmp/x/lecture.mp3" },
+      mimetype: "audio/mpeg",
       ptt: false,
     });
     expect(p.followUpText).toBe("cap");
+    // Ogg/Opus travels as an attachment named .ogg (inline opus showed "audio not available")
+    expect(plan("lecture.opus", 5_000_000).kind).toBe("document");
+    expect(plan("lecture.opus", 5_000_000).content).toMatchObject({
+      fileName: "lecture.ogg",
+      mimetype: "audio/ogg",
+    });
     expect(plan("a.mp3").content).toMatchObject({ mimetype: "audio/mpeg" });
     expect(plan("a.m4a").content).toMatchObject({ mimetype: "audio/mp4" });
   });
@@ -80,10 +86,10 @@ describe("audio sniffing", () => {
     expect(sniffAudio(Buffer.concat([Buffer.from("ID3"), Buffer.alloc(20)]))).toBe("mp3");
     expect(sniffAudio(Buffer.alloc(3))).toBeNull();
   });
-  it("sends opus as .ogg audio, trusting bytes over the name", () => {
-    const p = planMedia({ filePath: "/t/a.bin", fileName: "a.opus", sizeBytes: 1000, head: ogg });
-    expect(p.kind).toBe("audio");
-    expect(p.content).toMatchObject({ mimetype: "audio/ogg; codecs=opus" });
+  it("detects opus by its bytes even when the name lies", () => {
+    const p = planMedia({ filePath: "/t/a.bin", fileName: "a.bin", sizeBytes: 1000, head: ogg });
+    expect(p.kind).toBe("document");
+    expect(p.content).toMatchObject({ fileName: "a.ogg", mimetype: "audio/ogg" });
   });
   it("audioAsDocument sends a renamed .ogg attachment", () => {
     const p = planMedia({

@@ -97,10 +97,11 @@ export const settingsRegistry = {
   }),
   "delivery.maxAttachmentMb": def({
     schema: z.coerce.number().int().min(1).max(2000),
-    default: 64,
+    default: 300,
     envName: "MAX_ATTACHMENT_SIZE_MB",
     restart: false,
-    description: "Files larger than this are sent as links only.",
+    description:
+      "Files larger than this are sent as links only (WhatsApp itself accepts up to 2000 MB; free hosts have limited time, disk and memory).",
   }),
   "delivery.allowedMediaTypes": def({
     schema: z.array(z.string()),
@@ -116,14 +117,6 @@ export const settingsRegistry = {
     restart: false,
     description:
       "audio = sound files arrive as playable WhatsApp audio messages; document = as attachments (use if audio messages fail on your recipients' phones).",
-  }),
-  "delivery.audioNormalize": def({
-    schema: z.boolean(),
-    default: true,
-    envName: "DELIVERY_AUDIO_NORMALIZE",
-    restart: false,
-    description:
-      "Re-encode sound files to clean mono Ogg/Opus before sending (fixes 'audio not available' on files WhatsApp dislikes). Needs ffmpeg; skipped if absent.",
   }),
   "keepalive.intervalMinutes": def({
     schema: z.coerce.number().int().min(0).max(60),

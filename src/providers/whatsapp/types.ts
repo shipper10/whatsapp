@@ -35,8 +35,6 @@ export interface OutgoingDocument {
   quoteMessageId?: string;
   /** Send audio files as attachments rather than playable audio messages. */
   audioAsDocument?: boolean;
-  /** Re-encode audio to clean Ogg/Opus first (needs ffmpeg; silently skipped when unavailable). */
-  normalizeAudio?: boolean;
 }
 
 export interface SendResult {
