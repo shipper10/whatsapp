@@ -2,7 +2,7 @@ import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { audioFormat, splitAudio } from "../src/delivery/audioSplit.js";
+import { audioFormat, cleanAudioHeader, splitAudio } from "../src/delivery/audioSplit.js";
 
 const dir = () => mkdtemp(join(tmpdir(), "split-"));
 
@@ -107,7 +107,7 @@ describe("splitAudio", () => {
 
 describe("cover art in Opus tags", () => {
   it("replaces an oversized tags block in parts and in single files", async () => {
-    const { cleanOggHeader } = await import("../src/delivery/audioSplit.js");
+    const { cleanAudioHeader } = await import("../src/delivery/audioSplit.js");
     const d = await dir();
     const idPage = oggPage(0, 0n, Buffer.from("OpusHead".padEnd(19, "x")), 2);
     const bigTags = Buffer.alloc(6000, 126);
@@ -121,7 +121,7 @@ describe("cover art in Opus tags", () => {
     );
     const src = join(d, "c.opus");
     await writeFile(src, Buffer.concat([idPage, ...tagPages, ...data]));
-    const clean = await cleanOggHeader(src, "c.opus", d);
+    const clean = await cleanAudioHeader(src, "c.opus", d);
     expect(clean).not.toBeNull();
     const cb = await readFile(clean as string);
     expect(cb.length).toBeLessThan(40 * 228 + 500);
@@ -135,6 +135,72 @@ describe("cover art in Opus tags", () => {
       small,
       Buffer.concat([idPage, oggPage(1, 0n, Buffer.from("OpusTags")), ...data]),
     );
-    expect(await cleanOggHeader(small, "s.opus", d)).toBeNull();
+    expect(await cleanAudioHeader(small, "s.opus", d)).toBeNull();
+  });
+});
+
+describe("mp3 with ID3 cover art and a whole-file VBR header", () => {
+  const frame = () => Buffer.concat([Buffer.from([0xff, 0xfb, 0x54, 0xc0]), Buffer.alloc(188, 3)]); // 64 kbps, 48 kHz, mono = 192 bytes
+  const infoFrame = () => {
+    const f = frame();
+    f.fill(0, 4, 40);
+    f.write("Info", 21, "latin1");
+    return f;
+  };
+  const id3 = (n: number) => {
+    const h = Buffer.alloc(10);
+    h.write("ID3", 0, "latin1");
+    h[3] = 3;
+    h[6] = (n >> 21) & 0x7f;
+    h[7] = (n >> 14) & 0x7f;
+    h[8] = (n >> 7) & 0x7f;
+    h[9] = n & 0x7f;
+    return Buffer.concat([h, Buffer.alloc(n, 0x41)]);
+  };
+
+  it("drops the ID3 tag and the Info frame so every part reports only its own length", async () => {
+    const d = await dir();
+    const src = join(d, "l.mp3");
+    await writeFile(
+      src,
+      Buffer.concat([id3(5000), infoFrame(), ...Array.from({ length: 100 }, frame)]),
+    );
+    const r = await splitAudio(src, "l.mp3", d, 3000);
+    expect(r?.files.length).toBeGreaterThan(5);
+    let total = 0;
+    for (const f of r?.files ?? []) {
+      const b = await readFile(f);
+      expect(b.length).toBeLessThanOrEqual(3000);
+      expect(b.subarray(0, 4)).toEqual(Buffer.from([0xff, 0xfb, 0x54, 0xc0]));
+      expect(b.length % 192).toBe(0);
+      expect(b.includes("Info")).toBe(false);
+      expect(b.includes("ID3")).toBe(false);
+      total += b.length;
+    }
+    expect(total).toBe(100 * 192);
+  });
+
+  it("does not cut at a false sync inside audio data", async () => {
+    const d = await dir();
+    const trap = frame();
+    trap.fill(0xff, 100, 140); // many 0xFF 0xFF pairs that look like (invalid) headers
+    const src = join(d, "t.mp3");
+    await writeFile(src, Buffer.concat(Array.from({ length: 60 }, () => trap)));
+    const r = await splitAudio(src, "t.mp3", d, 2000);
+    for (const f of r?.files ?? []) expect((await readFile(f)).length % 192).toBe(0);
+  });
+
+  it("strips a big ID3 tag from a single file but leaves small ones alone", async () => {
+    const d = await dir();
+    const big = join(d, "b.mp3");
+    await writeFile(
+      big,
+      Buffer.concat([id3(9000), infoFrame(), ...Array.from({ length: 10 }, frame)]),
+    );
+    const c = await cleanAudioHeader(big, "b.mp3", d);
+    expect((await readFile(c as string)).length).toBe(11 * 192);
+    const small = join(d, "s.mp3");
+    await writeFile(small, Buffer.concat([id3(100), ...Array.from({ length: 10 }, frame)]));
+    expect(await cleanAudioHeader(small, "s.mp3", d)).toBeNull();
   });
 });

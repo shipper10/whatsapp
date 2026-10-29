@@ -108,7 +108,79 @@ type Ranges = {
   cleaned?: boolean;
 }[];
 
-/** Byte-sync formats (mp3 / aac): cut just before a frame header near the size limit. */
+const MP3_BITRATES_V1_L3 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+const MP3_BITRATES_V2_L3 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+const MP3_RATES: Record<number, number[]> = {
+  3: [44100, 48000, 32000],
+  2: [22050, 24000, 16000],
+  0: [11025, 12000, 8000],
+};
+
+/** Length of the Layer III frame starting at i, or 0 when there is no valid header there. */
+function mp3FrameLen(b: Buffer, i: number): number {
+  if (i + 4 > b.length || b[i] !== 0xff || ((b[i + 1] as number) & 0xe0) !== 0xe0) return 0;
+  const version = ((b[i + 1] as number) >> 3) & 3; // 3 = MPEG1, 2 = MPEG2, 0 = MPEG2.5
+  const layer = ((b[i + 1] as number) >> 1) & 3; // 1 = Layer III
+  const brIdx = ((b[i + 2] as number) >> 4) & 15;
+  const srIdx = ((b[i + 2] as number) >> 2) & 3;
+  if (version === 1 || layer !== 1 || brIdx === 0 || brIdx === 15 || srIdx === 3) return 0;
+  const rate = (MP3_RATES[version] as number[])[srIdx] as number;
+  const kbps = (version === 3 ? MP3_BITRATES_V1_L3 : MP3_BITRATES_V2_L3)[brIdx] as number;
+  const pad = ((b[i + 2] as number) >> 1) & 1;
+  return Math.floor(((version === 3 ? 144 : 72) * kbps * 1000) / rate) + pad;
+}
+
+/** Length of the ADTS (AAC) frame at i, or 0. */
+function aacFrameLen(b: Buffer, i: number): number {
+  if (i + 7 > b.length || b[i] !== 0xff || ((b[i + 1] as number) & 0xf6) !== 0xf0) return 0;
+  if ((((b[i + 2] as number) >> 2) & 15) >= 13) return 0;
+  const len =
+    (((b[i + 3] as number) & 3) << 11) | ((b[i + 4] as number) << 3) | ((b[i + 5] as number) >> 5);
+  return len >= 7 ? len : 0;
+}
+
+/** A real frame boundary: valid header here AND another valid header right after it (when we can see that far). */
+function isFrameStart(b: Buffer, i: number, aac: boolean): boolean {
+  const f = aac ? aacFrameLen : mp3FrameLen;
+  const len = f(b, i);
+  if (!len) return false;
+  return i + len + 4 > b.length ? true : f(b, i + len) > 0;
+}
+
+/** Where the audio really starts: after an ID3v2 tag, and after a VBR "Xing"/"Info" frame (which describes the WHOLE file). */
+async function mp3Bounds(
+  fh: FileHandle,
+  size: number,
+  dropInfoFrame: boolean,
+): Promise<{ start: number; end: number }> {
+  const head = await readAt(fh, 0, 16);
+  let start = 0;
+  if (head.subarray(0, 3).toString("latin1") === "ID3") {
+    const tag =
+      (((head[6] as number) & 0x7f) << 21) |
+      (((head[7] as number) & 0x7f) << 14) |
+      (((head[8] as number) & 0x7f) << 7) |
+      ((head[9] as number) & 0x7f);
+    start = 10 + tag + ((head[5] as number) & 0x10 ? 10 : 0);
+  }
+  if (dropInfoFrame) {
+    const w = await readAt(fh, start, 2048);
+    const at =
+      w.length >= 4 ? [0, 1, 2, 3].map((k) => mp3FrameLen(w, k)).findIndex((l) => l > 0) : -1;
+    if (at >= 0 && (w.indexOf("Xing", at) > 0 || w.indexOf("Info", at) > 0)) {
+      const tagAt = Math.max(w.indexOf("Xing", at), w.indexOf("Info", at));
+      if (tagAt - at <= 48) start += at + mp3FrameLen(w, at);
+    }
+  }
+  let end = size;
+  if (size - start > 128) {
+    const tail = await readAt(fh, size - 128, 3);
+    if (tail.toString("latin1") === "TAG") end = size - 128;
+  }
+  return { start, end };
+}
+
+/** Byte-sync formats (mp3 / aac): cut just before a validated frame header near the size limit. */
 async function plainRanges(
   fh: FileHandle,
   size: number,
@@ -117,21 +189,20 @@ async function plainRanges(
 ): Promise<Ranges> {
   const out: Ranges = [];
   let pos = 0;
-  while (pos < size) {
-    let end = Math.min(size, pos + max);
-    if (end < size) {
-      const win = await readAt(
-        fh,
-        Math.max(pos + 1, end - 65536),
-        end - Math.max(pos + 1, end - 65536),
-      );
-      const base = end - win.length;
-      for (let i = win.length - 2; i >= 0; i--) {
-        const ok = aac
-          ? win[i] === 0xff && ((win[i + 1] as number) & 0xf6) === 0xf0
-          : win[i] === 0xff && ((win[i + 1] as number) & 0xe0) === 0xe0;
-        if (ok) {
-          end = base + i;
+  let stop = size;
+  if (!aac) {
+    const b = await mp3Bounds(fh, size, true);
+    pos = b.start;
+    stop = b.end;
+  }
+  while (pos < stop) {
+    let end = Math.min(stop, pos + max);
+    if (end < stop) {
+      const from = Math.max(pos + 1, end - 65536);
+      const win = await readAt(fh, from, end + 8192 - from);
+      for (let i = end - from; i >= 0; i--) {
+        if (isFrameStart(win, i, aac)) {
+          end = from + i;
           break;
         }
       }
@@ -283,13 +354,6 @@ export async function splitAudio(
       const f = join(dir, `${base} (${i + 1}-${ranges.length}).${ext}`);
       let body = await readAt(fh, r.from, r.to - r.from);
       if (r.baseGranule !== undefined) body = rebaseOgg(body, 2, r.baseGranule);
-      if (ext === "mp3") {
-        // A VBR "Xing"/"Info" frame claims the duration of the WHOLE file; blank the tag so each part reports its own.
-        for (const tag of ["Xing", "Info"]) {
-          const at = body.subarray(0, 1024).indexOf(tag);
-          if (at > 0) body.fill(0, at, at + 4);
-        }
-      }
       await writeFile(f, r.prefix ? Buffer.concat([r.prefix, body]) : body);
       files.push(f);
     }
@@ -303,7 +367,7 @@ export async function splitAudio(
  * For Ogg/Opus files whose tags block is huge (embedded cover art), returns a copy with a minimal tags block,
  * otherwise null. Copies bytes only; no re-encoding.
  */
-export async function cleanOggHeader(
+export async function cleanAudioHeader(
   path: string,
   fileName: string,
   dir: string,
@@ -311,7 +375,16 @@ export async function cleanOggHeader(
   const fh = await open(path, "r");
   try {
     const size = (await stat(path)).size;
-    if (audioFormat(fileName, await readAt(fh, 0, 4096)) !== "ogg") return null;
+    const fmt = audioFormat(fileName, await readAt(fh, 0, 4096));
+    if (fmt === "mp3") {
+      // Big ID3 tags (cover art) are dead weight at best; strip them. The whole-file VBR header stays valid.
+      const b = await mp3Bounds(fh, size, false);
+      if (b.start < 4096 && b.end === size) return null;
+      const out = join(dir, "clean.mp3");
+      await writeFile(out, await readAt(fh, b.start, b.end - b.start));
+      return out;
+    }
+    if (fmt !== "ogg") return null;
     const ranges = await oggRanges(fh, size, Number.MAX_SAFE_INTEGER, { forceSingle: true });
     const r = ranges?.[0];
     if (!r?.prefix || !r.cleaned) return null; // nothing oversized to remove

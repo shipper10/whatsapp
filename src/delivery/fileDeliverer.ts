@@ -7,7 +7,7 @@ import type { ResourceDetail, ResourceSourceDetail } from "../library/browse.js"
 import { cleanCaption } from "../library/indexView.js";
 import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
-import { AUDIO_INLINE_MAX, cleanOggHeader, looksLikeAudio, splitAudio } from "./audioSplit.js";
+import { AUDIO_INLINE_MAX, cleanAudioHeader, looksLikeAudio, splitAudio } from "./audioSplit.js";
 import type { FileFetcher } from "./fetchers.js";
 import { formatLinksMessage, type LinkFlags, visibleLinks } from "./links.js";
 import { typeAllowed } from "./typeFilter.js";
@@ -221,7 +221,7 @@ export class FileDeliverer implements Deliverer {
         }
         // Opus files with a huge tags block (cover art) are unplayable on WhatsApp; send a cleaned copy.
         const cleaned = looksLikeAudio(file.mimeType, file.fileName)
-          ? await cleanOggHeader(file.path, file.fileName, dir).catch(() => null)
+          ? await cleanAudioHeader(file.path, file.fileName, dir).catch(() => null)
           : null;
         await target.progress?.uploading();
         const res = await this.d.provider.sendDocument({
