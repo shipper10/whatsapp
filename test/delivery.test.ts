@@ -68,12 +68,12 @@ class FakeFetcher implements FileFetcher {
   dirs: string[] = [];
   constructor(
     readonly type: "telegram" | "google_drive",
-    private mode: "ok" | "fail" | "hang" | "slow" | "toolarge" = "ok",
+    private mode: "ok" | "fail" | "hang" | "slow" | "toolarge" | "truncated" = "ok",
   ) {}
   canFetch(s: ResourceSourceDetail) {
     return s.type === this.type;
   }
-  async fetch(_s: ResourceSourceDetail, dir: string, _max: number, signal: AbortSignal) {
+  async fetch(s: ResourceSourceDetail, dir: string, _max: number, signal: AbortSignal) {
     this.calls++;
     this.active++;
     this.maxActive = Math.max(this.maxActive, this.active);
@@ -86,7 +86,8 @@ class FakeFetcher implements FileFetcher {
       if (this.mode === "slow") await new Promise((r) => setTimeout(r, 60));
       const path = join(dir, "Sheet 7.pdf");
       writeFileSync(path, "x");
-      return { path, fileName: "Sheet 7.pdf", mimeType: "application/pdf", sizeBytes: 1 };
+      const size = this.mode === "truncated" ? this.calls : (s.sizeBytes ?? 1);
+      return { path, fileName: "Sheet 7.pdf", mimeType: "application/pdf", sizeBytes: size };
     } finally {
       this.active--;
     }
@@ -155,6 +156,15 @@ describe("FileDeliverer", () => {
     expect(t.calls).toBe(1);
     expect(g.calls).toBe(1);
     expect(provider.docs).toHaveLength(1);
+  });
+
+  it("retries once when the downloaded size differs from the source size, and falls back to links if it keeps changing", async () => {
+    const f = new FakeFetcher("telegram", "truncated");
+    const { provider, deliverer } = await setup(detail([{ ...tg, sizeBytes: 999 }]), [f]);
+    await deliverer.deliver(1, target);
+    expect(f.calls).toBeGreaterThanOrEqual(2);
+    expect(provider.docs).toHaveLength(0);
+    expect(provider.last()).toContain("https://t.me/BahriMed/59");
   });
 
   it("never fetches Drive content unless explicitly enabled", async () => {

@@ -133,15 +133,17 @@ export class FileDeliverer implements Deliverer {
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
   }> {
-    const [maxMb, allowed, timeoutS, driveOn, audioMode, splitAudioOn, lang] = await Promise.all([
-      this.d.settings.get("delivery.maxAttachmentMb"),
-      this.d.settings.get("delivery.allowedMediaTypes"),
-      this.d.settings.get("delivery.timeoutSeconds"),
-      this.d.settings.get("delivery.driveDownload"),
-      this.d.settings.get("delivery.audioMode"),
-      this.d.settings.get("delivery.splitLargeAudio"),
-      this.d.settings.get("bot.language"),
-    ]);
+    const [maxMb, allowed, timeoutS, driveOn, audioMode, splitAudioOn, lang, partMb] =
+      await Promise.all([
+        this.d.settings.get("delivery.maxAttachmentMb"),
+        this.d.settings.get("delivery.allowedMediaTypes"),
+        this.d.settings.get("delivery.timeoutSeconds"),
+        this.d.settings.get("delivery.driveDownload"),
+        this.d.settings.get("delivery.audioMode"),
+        this.d.settings.get("delivery.splitLargeAudio"),
+        this.d.settings.get("bot.language"),
+        this.d.settings.get("delivery.audioPartMb"),
+      ]);
     const maxBytes = maxMb * 1024 * 1024;
 
     const candidates: { src: ResourceSourceDetail; fetcher: FileFetcher }[] = [];
@@ -195,14 +197,27 @@ export class FileDeliverer implements Deliverer {
       };
       try {
         target.progress?.downloading(0, src.sizeBytes);
-        const file = await fetcher.fetch(src, dir, maxBytes, ctl.signal, (done, total) => {
-          arm();
-          target.progress?.downloading(done, total ?? src.sizeBytes);
-        });
+        const download = () =>
+          fetcher.fetch(src, dir, maxBytes, ctl.signal, (done, total) => {
+            arm();
+            target.progress?.downloading(done, total ?? src.sizeBytes);
+          });
+        let file = await download();
+        // Integrity: the byte count must match what the source says. One retry; if the second copy has the
+        // same size as the first, the stored size was stale and the file itself is fine.
+        if (src.sizeBytes !== null && file.sizeBytes !== src.sizeBytes) {
+          this.d.logger.warn(
+            { source: src.type, expected: src.sizeBytes, got: file.sizeBytes },
+            "download size mismatch, retrying once",
+          );
+          const again = await download();
+          if (again.sizeBytes !== file.sizeBytes) throw new Error("IncompleteDownload");
+          file = again;
+        }
         clearTimeout(timer);
         if (looksLikeAudio(file.mimeType, file.fileName) && file.sizeBytes > AUDIO_INLINE_MAX) {
           if (!splitAudioOn) return { status: "too_large" };
-          return await this.sendAudioParts(file, dir, caption, target, audioMode, lang);
+          return await this.sendAudioParts(file, dir, caption, target, audioMode, lang, partMb);
         }
         // Opus files with a huge tags block (cover art) are unplayable on WhatsApp; send a cleaned copy.
         const cleaned = looksLikeAudio(file.mimeType, file.fileName)
@@ -239,8 +254,11 @@ export class FileDeliverer implements Deliverer {
     target: DeliveryTarget,
     audioMode: "audio" | "document",
     lang: "ar" | "en",
+    partMb: number,
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
-    const split = await splitAudio(file.path, file.fileName, dir).catch(() => null);
+    const split = await splitAudio(file.path, file.fileName, dir, partMb * 1000 * 1000).catch(
+      () => null,
+    );
     if (!split) return { status: "too_large" };
     const n = split.files.length;
     await this.d.provider.sendText({

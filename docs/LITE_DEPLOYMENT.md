@@ -73,3 +73,5 @@ Render's free tier gives 750 instance-hours per month: enough for one always-on 
 - Status message edits are limited on purpose (10% steps, at least 4 s apart, at most 40 edits, none after ~14 min) to stay far from anything that looks like spam.
 - Audio over 16 MB (WhatsApp cannot play more inline): the bot sends an explanation (with the links), then the parts in order ("Part 2 of 5"). Parts are cut by copying bytes (no re-encoding, no CPU load) for mp3, aac, ogg/opus, amr and wav; m4a cannot be cut safely and gets links only. To turn splitting off and give links only: `/set delivery.splitLargeAudio false`.
 - Opus files that carry an embedded cover picture inside their tags (a typical cause of "audio is not available") are sent as a copy with the picture removed; the sound itself is untouched.
+- Download check: every downloaded file's size must equal the size the source reports (Telegram/Drive). A mismatch triggers one re-download; if the copies still differ, the bot sends links instead of a possibly damaged file.
+- `/set delivery.audioPartMb 8` makes split parts smaller (2 to 15 MB) if a long part stops playing midway.

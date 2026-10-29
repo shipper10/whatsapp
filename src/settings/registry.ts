@@ -126,6 +126,14 @@ export const settingsRegistry = {
     description:
       "Audio over 16 MB (WhatsApp's limit) is sent as ordered parts, cut without re-encoding. false = links only for such files.",
   }),
+  "delivery.audioPartMb": def({
+    schema: z.coerce.number().int().min(2).max(15),
+    default: 15,
+    envName: "DELIVERY_AUDIO_PART_MB",
+    restart: false,
+    description:
+      "Size of each part when a large audio file is split (MB, max 15). Lower it (e.g. 8) if long parts stop playing midway.",
+  }),
   "keepalive.intervalMinutes": def({
     schema: z.coerce.number().int().min(0).max(60),
     default: 10,

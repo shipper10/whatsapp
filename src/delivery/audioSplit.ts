@@ -161,6 +161,7 @@ async function oggRanges(
     pages.push({ pos, len, granule: h.readBigInt64LE(6), continued: ((h[5] as number) & 1) === 1 });
     pos += len;
   }
+  if (pos !== size) return null; // truncated or trailing garbage: not safe to cut
   let hdrEnd = 0;
   while (hdrEnd < pages.length && (pages[hdrEnd] as (typeof pages)[number]).granule <= 0n) hdrEnd++;
   if (hdrEnd === 0 || hdrEnd >= pages.length) return null;
