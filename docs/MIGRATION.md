@@ -1,24 +1,29 @@
-# Moving the bot to another host or account
+# النقل إلى استضافة أو حساب آخر
 
-Nothing important lives on the host. Everything that identifies the bot is in two places:
+لا شيء مهم يعيش على الاستضافة نفسها. كل ما يعرّف البوت موجود في ثلاثة أماكن:
 
-| What | Where | Needed on the new host |
+| ماذا | أين | ما تحتاجه في المكان الجديد |
 |---|---|---|
-| WhatsApp login, library, sessions, settings | PostgreSQL (`DATABASE_URL`) | the **same** `DATABASE_URL` |
-| Telegram login | `TELEGRAM_SESSION_STRING` env var | the same value (+ `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_CHANNEL`) |
-| Google Drive key | `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` (or `_JSON`) env var | the same value |
+| دخول واتساب، المكتبة، الجلسات، الإعدادات | قاعدة PostgreSQL (`DATABASE_URL`) | **نفس** `DATABASE_URL` |
+| دخول تيليجرام | `TELEGRAM_SESSION_STRING` | نفس القيمة + `TELEGRAM_API_ID/HASH/CHANNEL` |
+| مفتاح درايف | `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` (أو `_JSON`) | نفس القيمة |
 
-So: no new WhatsApp QR scan, no new Telegram login, no re-sync, no lost settings.
+النتيجة: **لا مسح QR جديد، ولا تسجيل دخول تيليجرام جديد، ولا إعادة مزامنة، ولا ضياع إعدادات** (في الوضع الخفيف).
 
-## Steps
-1. **Stop the old instance first** (suspend/delete the old service). Two instances using the same WhatsApp login fight each other and can get the number logged out.
-2. On the new host/account (Render: *New > Blueprint* with this repo's `render.yaml`, or a normal Web Service: build `npm ci && npm run build`, start `npm start`, Node 22), enter the same variables:
+## الخطوات (الوضع الخفيف)
+1. **أوقف النسخة القديمة أولًا** (Suspend/Delete). تشغيل نسختين على نفس دخول واتساب يجعلهما تتنازعان وقد يُخرج الرقم من واتساب.
+2. في المكان الجديد (Render: *New ← Blueprint* بـ `render.yaml`، أو Web Service عادية: build `npm ci && npm run build`، start `npm start`، Node 22) أدخل نفس المتغيرات:
    `DATABASE_URL`, `ADMIN_HTTP_TOKEN`, `ADMIN_IDS`, `WHATSAPP_PROVIDER=baileys`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_CHANNEL`, `TELEGRAM_SESSION_STRING`, `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`, `DB_POOL_MAX=3`, `TEMP_FILE_DIR=/tmp/bot`.
-3. Deploy. On start it migrates (nothing to change), loads the WhatsApp login from the DB and reconnects by itself.
-4. Update the UptimeRobot monitor to the new `https://<new-service>.onrender.com/healthz`.
+3. انشر. عند التشغيل يطبّق الترقيات (لا جديد)، ويحمّل دخول واتساب من القاعدة ويتصل وحده.
+4. حدّث مراقب UptimeRobot إلى الرابط الجديد `https://<الخدمة-الجديدة>.onrender.com/healthz`.
 
-Tip: to make the base64 value from the key file: `base64 -w0 key.json` (Linux) or `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json"))` (PowerShell).
+## نقل قاعدة البيانات نفسها (تغيير حساب Neon/Supabase)
+`pg_dump "$OLD_URL" | psql "$NEW_URL"` ثم استعمل الرابط الجديد. بدون نسخ يمكنك إعادة ربط واتساب ومزامنة تيليجرام ودرايف من جديد وهذا مقبول أيضًا.
 
-If the database itself must move (Neon/Supabase account change): `pg_dump "$OLD_URL" | psql "$NEW_URL"`, then use the new URL. Without a dump you would re-link WhatsApp and re-sync Telegram/Drive, which is also fine.
+## بين الوضعين (خفيف ⇄ كامل)
+المكتبة والإعدادات في PostgreSQL تبقى، لكن **ربط واتساب يُعاد** (مسح QR) لأن مكان الدخول يختلف. التفاصيل في [`MODES.md`](MODES.md).
 
-Keep a private copy of these variables (password manager) so a move is a copy-paste job.
+## الوضع الكامل (Docker)
+انسخ مجلد `backups` أو خذ `pg_dump` وانسخ حجم `openwa-data`، ثم `docker compose up -d` على الجهاز الجديد بنفس `.env`.
+
+نصيحة: احتفظ بنسخة خاصة من المتغيرات في مدير كلمات مرور، فتصبح الهجرة نسخًا ولصقًا.

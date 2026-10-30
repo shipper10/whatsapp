@@ -81,3 +81,13 @@ Checked in the OpenWA source (shallow clone, last commit 2026-10-21, v0.25.0):
 ## 8. Update 2026-10-26: lite mode (direct Baileys)
 
 Decision: free hosts that need no card (bot-hosting.net, Wispbyte) cannot run Docker or a separate OpenWA container, and Oracle sign-up was not possible. Added `WHATSAPP_PROVIDER=baileys`: the bot uses `@whiskeysockets/baileys` directly behind the same `WhatsAppProvider` interface, with the login and Signal keys stored in Postgres (`wa_auth_state`), so ephemeral disks are fine. OpenWA mode is unchanged and remains the recommended setup where Docker is available. Ban risk is accepted by the owner. Measured idle RSS about 140 MB (no Telegram/Drive activity), so a 256 MB host is plausible but unproven under sync load.
+
+## 9. تحديث 2026-10-30: قرارات لاحقة
+
+- **الوضع الخفيف هو المستعمل فعليًا** (Render + Postgres مجاني). OpenWA يبقى خيارًا للخوادم الدائمة. المقارنة: `docs/MODES.md`.
+- **لا ffmpeg في الإنتاج.** جُرّبت إعادة الترميز لإصلاح الصوت فتبيّن أنها بطيئة وثقيلة على الاستضافة المجانية ولا تحل السبب الحقيقي، فأُزيلت. السبب الفعلي: حد واتساب 16MB للصوت، وصورة الغلاف داخل وسوم opus، وترويسة mp3 (ID3 + Info) التي تصف الملف كله. الحل: نسخ بايتات دون ترميز (`src/delivery/audioSplit.ts`). ffmpeg يُستعمل محليًا للتحقق فقط.
+- **تقدم الرفع:** Baileys لا يوفر مؤشرًا، فيُقاس عبر وكيل HTTPS خاص (`UploadMeter`) يعدّ البايتات المكتوبة على اتصال كل رفع (يعمل لأن Baileys يرفع عبر `https` الأصلي).
+- **المكتبات:** Baileys `7.0.0-rc14` هو آخر إصدار؛ لا ترقية متاحة تحل مشاكل الصوت (التشغيل يتم في تطبيق واتساب).
+- **ألبومات تيليجرام** تُدمج في عنصر واحد بمعرّف المجموعة المخزن داخل `entities_json` (لا ترقية على الجداول)، مع قراءة رجعية واحدة للرسائل القديمة.
+- **تعديل رسالة الحالة** بدل رسائل متعددة، بحدود تخفف خطر الحظر (خطوات 10%، فاصل لا يقل عن 4 ث للتنزيل و6 ث للرفع، حد 40 تعديلًا و14 دقيقة).
+- **قابلية النقل:** مفتاح درايف عبر متغير بيئة (base64) وكل الحالة في PostgreSQL، فالنقل بنسخ المتغيرات فقط (`docs/MIGRATION.md`).

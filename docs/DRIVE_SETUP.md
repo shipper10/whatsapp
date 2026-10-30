@@ -1,37 +1,48 @@
-# Linking Google Drive (optional)
+# ربط Google Drive (اختياري)
 
-The bot works from the Telegram channel alone. Drive only adds extra copies/links (matched to the Telegram files by name and size). You can skip this and add it later.
+يعمل البوت من قناة تيليجرام وحدها. درايف يضيف **نسخًا وروابط إضافية** تُطابَق مع ملفات تيليجرام بالاسم والحجم.
+يمكنك تخطي هذه الخطوة وإضافتها لاحقًا. كل ما يلي مجاني بلا بطاقة بنكية.
 
-Everything below is free and needs no credit card.
+## 1. إنشاء حساب خدمة (مرة واحدة)
+1. افتح <https://console.cloud.google.com/> بأي حساب Google.
+2. شريط الأعلى ← قائمة المشاريع ← **New project** (مثلًا `library-bot`) ← Create.
+3. القائمة ← **APIs & Services ← Library** ← ابحث **Google Drive API** ← **Enable**.
+4. القائمة ← **IAM & Admin ← Service Accounts** ← **Create service account** (الاسم `library-bot`) ← Done.
+5. افتح الحساب ← **Keys ← Add key ← Create new key ← JSON** ← Create. يُنزَّل ملف `.json` سري.
+6. انسخ بريد الحساب (شكله `library-bot@library-bot-123456.iam.gserviceaccount.com`، وهو أيضًا `client_email` داخل الملف).
 
-## 1. Create a service account (once)
-1. Open <https://console.cloud.google.com/> and sign in with any Google account.
-2. Top bar > project list > **New project** (name it e.g. `library-bot`) > Create.
-3. Menu > **APIs & Services > Library** > search **Google Drive API** > **Enable**.
-4. Menu > **IAM & Admin > Service Accounts** > **Create service account** (name `library-bot`) > Done.
-5. Click the new account > **Keys** > **Add key > Create new key > JSON** > Create. A `.json` file downloads. Keep it secret.
-6. Copy the account's email (it looks like `library-bot@library-bot-123456.iam.gserviceaccount.com`; also written as `client_email` inside the JSON).
+## 2. مشاركة مجلدات درايف معه
+لكل مجلد تريد فهرسته: فتحه في درايف ← **Share** ← الصق بريد حساب الخدمة ← الدور **Viewer** ← Send.
+المجلدات التي يملكها أشخاص مختلفون يشاركها كل مالك بنفسه. المجلدات الفرعية تدخل تلقائيًا.
 
-## 2. Share the Drive folders with it
-For each Drive folder the bot should index: open it in Drive > **Share** > paste the service-account email > role **Viewer** > Send. (Folders owned by different people each need this done by their owner.) Subfolders are included automatically.
+## 3. إعطاء المفتاح للبوت (اختر طريقة واحدة)
+- **الأسهل والأفضل للنقل بين الاستضافات:** حوّل الملف إلى base64 وضعه في متغير البيئة `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`:
+  - لينكس/ماك: `base64 -w0 key.json`
+  - ويندوز PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("key.json"))`
+  - (أو ضع محتوى JSON كما هو في `GOOGLE_SERVICE_ACCOUNT_JSON`.)
+  - يكتب البوت الملف وحده عند التشغيل بصلاحيات مقيدة.
+- **ملف سري في Render:** Environment ← Secret Files ← الاسم `drive.json` والصق المحتوى، ثم `GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/etc/secrets/drive.json`.
+- **أي استضافة بمدير ملفات:** ارفع الملف خارج أي مستودع عام وضع مساره في `GOOGLE_SERVICE_ACCOUNT_JSON_PATH`.
+- لا ترفع الملف إلى GitHub أبدًا.
 
-## 3. Give the key file to the bot
-- **Render**: Dashboard > your service > **Environment > Secret Files > Add** > file name `drive.json`, paste the whole JSON content. Then add the variable `GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/etc/secrets/drive.json`. Redeploy.
-- **bot-hosting.net / Wispbyte / any host with a file manager**: upload the JSON next to the app (outside any public Git repo) and set `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` to its path.
-- Never commit the JSON to GitHub.
+أعد النشر بعد تعديل المتغيرات.
 
-## 4. Register the folders from WhatsApp (as an admin, private chat)
+## 4. تسجيل المجلدات من واتساب (مشرف، محادثة خاصة)
 ```
-/source add Year1 https://drive.google.com/drive/folders/<folder-id>
+/source add Year1 https://drive.google.com/drive/folders/<معرّف-المجلد>
 /sync drive
 /status
 ```
-`/sources` lists them, `/source off <id>` pauses one. `/status` shows a source error if the folder was not shared with the service-account email.
+`/sources` يعرض المصادر، و`/source off <id>` يوقف مصدرًا. يعرض `/status` خطأ المصدر إن لم يُشارَك المجلد مع بريد حساب الخدمة.
+(من الحاسوب: `npm run drive:source -- add "Year 1" "<رابط>"` ثم `npm run drive:source -- check`.)
 
-## How Drive links appear
-A Drive file is attached to a Telegram file when they are clearly the same file: same name and size, or (if the name differs) the same size and extension and no other candidate. The Drive link is then added to the file's caption when it is sent. Files that cannot be matched safely stay as separate library entries found by search (`؟ كلمة`).
+## كيف تظهر روابط درايف؟
+- يُربط ملف درايف بملف تيليجرام حين يتطابقان بوضوح: **الاسم والحجم**، أو (إن اختلف الاسم) **الحجم والامتداد** دون مرشح آخر.
+- عندها يُضاف رابط درايف إلى وصف الملف عند إرساله. الملفات التي لا تُطابَق بأمان تبقى عناصر مستقلة تُوجد بالبحث (`؟ كلمة`).
+- يمكن إخفاء روابط درايف: `/set links.drive false`.
 
-## Notes
-- Indexing reads **metadata only** (names, sizes, folder paths).
-- Sending Drive files themselves is off by default. Turn it on only if you want it: `/set delivery.driveDownload true` (the key then needs read access to file contents, which the Viewer share already gives).
-- Drive links never make files public; the bot only shows links for files that people can open with their own access.
+## ملاحظات
+- الفهرسة تقرأ **بيانات وصفية فقط** (الأسماء والأحجام والمسارات)، وتطلب صلاحية القراءة الوصفية فقط.
+- **إرسال ملفات درايف نفسها** متوقف افتراضيًا. لتفعيله: `/set delivery.driveDownload true` (يحتاج حساب الخدمة صلاحية قراءة المحتوى، وهي متاحة بمشاركة Viewer).
+- لا يجعل البوت أي ملف عامًا؛ الروابط تفتح لمن لديه صلاحية أصلًا.
+- حسابات خدمة مختلفة لمصادر مختلفة: ضع مفتاحًا ثانيًا في متغير جديد وأضف المصدر بـ `credential_ref` = `env:اسم_المتغير`.

@@ -1,54 +1,55 @@
-# WhatsApp Medical Library Bot
+# بوت مكتبة واتساب الطبية
 
-Metadata-only library bot: Telegram channel + Google Drive folders -> searchable library in WhatsApp
-(private chats and groups, one independent session per participant).
-Design plan: `whatsapp_medical_library_bot_implementation_plan.md`. Reuse decisions: `docs/ALTERNATIVES_AND_DECISIONS.md`.
+بوت واتساب يعرض محتوى قناة تيليجرام (وملفات Google Drive اختياريًا) كمكتبة قابلة للتصفح والبحث،
+في المحادثات الخاصة والمجموعات. لكل شخص جلسة مستقلة، ويرسل الملفات نفسها لا الروابط فقط.
 
-## Stack (all free / open source)
-OpenWA (WhatsApp gateway, Baileys engine) · teleproto (Telegram, maintained fork of GramJS) · googleapis (Drive) · PostgreSQL + Drizzle · zod · pino · vitest.
+## ماذا يفعل؟
+- **يتصفح بفهارس القناة نفسها:** كل ملف أو فهرس فرعي له رقم 【ن】؛ أرسل الرقم ليصلك.
+- **إرسال دفعي:** `1-5` أو `3,7,9` أو بالنوع `شيت 1-5` أو `كل الشيتات`.
+- **بحث** بالاسم، والانتقال السريع لفهرس مادة بكتابة اسمها (`كيمياء`).
+- **يرسل الملف الفعلي** ومعه نص القناة وروابط تيليجرام/درايف (كل نوع قابل للإخفاء).
+- **ألبومات تيليجرام** تُعامل عنصرًا واحدًا وتُرسل كاملة بالترتيب.
+- **الصوت الكبير** (فوق حد واتساب 16MB) يُقسَّم إلى أجزاء مرتبة دون إعادة ترميز.
+- **شريط تقدم** للطابور والتنزيل والرفع (نسبة، سرعة، زمن متبقٍ).
+- **المجموعات:** يرد فقط عند مناداته بـ `!` ولمن سأله فقط.
+- **كل شيء قابل للتعديل** من واتساب بأوامر المشرف دون إعادة نشر.
 
-## Layout
-```
-src/config/      deployment env (secrets, restart-level) validated by zod
-src/settings/    runtime settings: registry.ts (declare once) + service.ts (DB > env > default)
-src/db/          Drizzle schema, client, migrations runner  (SQL in ./drizzle)
-src/providers/   provider-neutral WhatsApp interface (OpenWA adapter next)
-src/core/        normalization (Arabic/English), session key rules
-test/            vitest
-```
+## الوضعان
+| | الوضع الخفيف (`baileys`) | الوضع الكامل (`openwa`) |
+|---|---|---|
+| العملية | برنامج واحد يضم واتساب وتيليجرام ودرايف | البوت + حاوية OpenWA + PostgreSQL |
+| الاستضافة | Render / استضافات مجانية بلا بطاقة، بلا Docker | جهاز يشغّل Docker (VPS، Oracle Free، جهازك) |
+| حفظ دخول واتساب | في قاعدة PostgreSQL | في مجلد حاوية OpenWA |
+| شريط التقدم المعدَّل والرفع المقاس | نعم | لا (رسالة حالة واحدة فقط) |
+| الأنسب | الاستخدام اليومي المجاني | من يملك خادمًا ثابتًا ويريد فصل البوابة |
 
-## Changing things without reprogramming
-- **Secrets / deployment** -> `.env` (restart needed).
-- **Everything else operational** (page size, TTL, intervals, size limits, group mode, welcome text, aliases,
-  Drive sources, academic nodes) -> database tables. Settings are declared once in `src/settings/registry.ts`;
-  add one entry to add a new editable setting.
-- WhatsApp provider is behind `WhatsAppProvider`; swapping it does not touch bot logic.
+التفاصيل والاختيار بينهما: [`docs/MODES.md`](docs/MODES.md).
 
-## Develop
+## الوثائق
+| الملف | لمن | المحتوى |
+|---|---|---|
+| [`docs/MODES.md`](docs/MODES.md) | الجميع | الفرق بين الوضعين وكيف تختار |
+| [`docs/DEPLOY_LITE.md`](docs/DEPLOY_LITE.md) | المشرف | تشغيل الوضع الخفيف على Render خطوة بخطوة |
+| [`docs/DEPLOY_FULL.md`](docs/DEPLOY_FULL.md) | المشرف | تشغيل الوضع الكامل بـ Docker + OpenWA، والنسخ الاحتياطي |
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | الطلاب | طريقة استخدام البوت في الخاص والمجموعات |
+| [`docs/ADMIN_GUIDE.md`](docs/ADMIN_GUIDE.md) | المشرف | كل أوامر الإشراف وأهم الإعدادات |
+| [`docs/SETTINGS.md`](docs/SETTINGS.md) | المشرف | مرجع كل الإعدادات (يُولَّد تلقائيًا) |
+| [`docs/TELEGRAM_SETUP.md`](docs/TELEGRAM_SETUP.md) | المشرف | الحصول على مفاتيح تيليجرام وجلسة الدخول |
+| [`docs/DRIVE_SETUP.md`](docs/DRIVE_SETUP.md) | المشرف | ربط Google Drive (اختياري) |
+| [`docs/MIGRATION.md`](docs/MIGRATION.md) | المشرف | النقل لحساب/استضافة أخرى دون إعادة ربط |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | المشرف | المشاكل الشائعة وحلولها |
+| [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | المطوّر | بنية الكود والاختبار وكيف تضيف إعدادًا أو أمرًا |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | المطوّر | ما نحتاجه مستقبلًا |
+| [`docs/ALTERNATIVES_AND_DECISIONS.md`](docs/ALTERNATIVES_AND_DECISIONS.md) | المطوّر | لماذا اخترنا هذه المكتبات |
+| [`whatsapp_medical_library_bot_implementation_plan.md`](whatsapp_medical_library_bot_implementation_plan.md) | المطوّر | خطة التصميم الأصلية (مرجع تاريخي) |
+
+## تنبيه مهم
+البوت يستخدم واتساب غير الرسمي (Baileys)، فبعض الخطر وارد أن يُقيَّد الرقم. استعمل رقمًا مخصصًا للبوت،
+وأبقِ سرعة الإرسال معقولة. هذا الخطر مقبول من المالك.
+
+## البدء السريع للمطوّر
 ```
 npm install
 npm run typecheck && npm run lint && npm test
-DATABASE_URL=... npm run db:migrate
 ```
-
-## Deploy (free)
-Any always-on Docker host. Best free fit: Oracle Cloud Always Free VM. Platforms that sleep or have
-ephemeral disks (Render, Koyeb, Railway, Fly trial) are unsuitable for a persistent WhatsApp session.
-```
-cp .env.example .env   # fill values
-docker compose up -d
-# link the number: ssh -L 2785:localhost:2785 <host>, open http://localhost:2785, create session, scan QR
-```
-Back up the `pgdata` and `openwa-data` volumes (`pg_dump` + copy of openwa-data); the WhatsApp login lives there.
-
-## Status
-Slice 1 done: scaffold, config, settings, schema, session-key rule, normalization, Docker.
-Slice 2 done: Telegram parser, idempotent resumable sync (teleproto source), login script (`npm run telegram:login`).
-Slice 3 done: Drive metadata sync (service account, recursive, per-source isolation, `npm run drive:source`).
-Slice 4 done: metadata-only classification (index tree -> semester/subject/topic, category tags, Drive matching), apply, search (FTS + aliases + trigram), browse. Tested on real Postgres (PGlite) with the full channel structure.
-Slice 5 done: OpenWA adapter (signed webhook in, send-text out), per-participant persistent sessions, conversation engine (browse, search, paging, back/home), group triggers and policies, rate limit, dedupe. Setup: `docs/WHATSAPP_SETUP.md`.
-Slice 6 done: file delivery (Telegram download, optional Drive download, size/type limits, timeout, temp cleanup, links always included, link fallback), sync scheduler (runtime-editable intervals, no overlap, stale detection), end-to-end test of the running app.
-Slice 7 done: admin commands over WhatsApp (status, stats, sync now, settings, Drive sources, review/assign, aliases, admins, audit), daily backups + restore drill, operations guide (`docs/OPERATIONS.md`).
-Lite mode done: `WHATSAPP_PROVIDER=baileys` runs WhatsApp inside the bot process (no Docker, login kept in Postgres) for free hosts without a card. Guide: `docs/LITE_DEPLOYMENT.md`.
-Update: browsing now follows the channel's own index messages (no classification needed), numbered 【n】 links with ranges and typed batches, `!` prefix in groups, captions, and a gap-proof Telegram sync. Drive setup: `docs/DRIVE_SETUP.md`.
-Next: real-account verification (Telegram login, Drive share, WhatsApp link), then polish from live feedback.
+ثم [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
