@@ -120,6 +120,7 @@ class FakeSocket implements SocketLike {
   sent: { jid: string; content: unknown; opts?: unknown }[] = [];
   ended = false;
   failNext = false;
+  withBody = false;
   ev = { on: (e: string, l: (arg: never) => void) => void this.handlers.set(e, l) };
   async sendMessage(jid: string, content: unknown, opts?: unknown) {
     if (this.failNext) {
@@ -127,7 +128,12 @@ class FakeSocket implements SocketLike {
       throw new Error("boom");
     }
     this.sent.push({ jid, content, opts });
-    return { key: { id: `out${this.sent.length}` } } as WAMessage;
+    return {
+      key: { id: `out${this.sent.length}` },
+      ...(this.withBody && {
+        message: { documentMessage: { mediaKey: "mk", fileName: "a.pdf", caption: "x" } },
+      }),
+    } as WAMessage;
   }
   async requestPairingCode(p: string) {
     return `code-${p}`;
@@ -218,6 +224,40 @@ describe("BaileysProvider", () => {
       document: { url: "/tmp/a.pdf" },
       fileName: "a.pdf",
     });
+    await p.stop();
+  });
+
+  it("re-forwards a cached upload with the new caption and falls back when it is gone", async () => {
+    const { p, sockets } = await setup("p4");
+    const s = sockets[0] as FakeSocket;
+    s.emit("connection.update", { connection: "open" });
+    s.withBody = true;
+    const doc = {
+      conversationId: "c",
+      filePath: "/tmp/a.pdf",
+      fileName: "a.pdf",
+      mimeType: "application/pdf",
+      caption: "first",
+      cache: { key: "k", ttlMs: 60_000 },
+    };
+    expect(await p.sendCached({ conversationId: "d", cache: doc.cache })).toBeNull();
+    await p.sendDocument(doc);
+    expect(p.cacheSize()).toBe(1);
+    const r = await p.sendCached({
+      conversationId: "d",
+      cache: doc.cache,
+      caption: "second",
+      quoteMessageId: undefined,
+    });
+    expect(r?.confirmed).toBe(true);
+    const fwd = s.sent.at(-1)?.content as {
+      forward: { message: { documentMessage: Record<string, unknown> } };
+    };
+    expect(fwd.forward.message.documentMessage.caption).toBe("second");
+    expect(fwd.forward.message.documentMessage.mediaKey).toBe("mk");
+    // expired entries are dropped
+    expect(await p.sendCached({ conversationId: "d", cache: { key: "k", ttlMs: -1 } })).toBeNull();
+    expect(p.cacheSize()).toBe(0);
     await p.stop();
   });
 

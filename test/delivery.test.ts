@@ -100,6 +100,7 @@ async function setup(
   settings: Record<string, unknown> = {},
   concurrency = 2,
   libraryExtras: Partial<LibraryPort> = {},
+  freeDisk?: () => Promise<number | null>,
 ) {
   const provider = new FakeProvider();
   const store = new MemSettings();
@@ -115,6 +116,7 @@ async function setup(
     concurrency,
     log: { record: async (_id, outcome, error) => void records.push({ outcome, error }) },
     logger: { warn: () => {} },
+    freeDiskMb: freeDisk,
   });
   return { provider, deliverer, records, tempDir };
 }
@@ -377,5 +379,63 @@ describe("helpers", () => {
     );
     expect(text.match(/t\.me/g)).toHaveLength(1);
     expect(text).not.toContain("Google Drive");
+  });
+});
+
+describe("load protection and reuse", () => {
+  it("re-forwards a file already uploaded instead of downloading it again", async () => {
+    const f = new FakeFetcher("telegram");
+    const { provider, deliverer } = await setup(detail([tg]), [f]);
+    await deliverer.deliver(1, target);
+    await deliverer.deliver(1, { conversationId: "2@c.us" });
+    expect(f.calls).toBe(1);
+    expect(provider.docs).toHaveLength(1);
+    expect(provider.resent).toHaveLength(1);
+    expect(deliverer.stats().queued).toBe(0);
+  });
+
+  it("does not cache when the cache is off", async () => {
+    const f = new FakeFetcher("telegram");
+    const { provider, deliverer } = await setup(detail([tg]), [f], { "delivery.cacheHours": 0 });
+    await deliverer.deliver(1, target);
+    await deliverer.deliver(1, target);
+    expect(f.calls).toBe(2);
+    expect(provider.resent).toHaveLength(0);
+  });
+
+  it("two people asking for the same file at once cause one download", async () => {
+    const f = new FakeFetcher("telegram", "slow");
+    const { provider, deliverer } = await setup(detail([tg]), [f], {}, 2);
+    await Promise.all([
+      deliverer.deliver(1, target),
+      deliverer.deliver(1, { conversationId: "2@c.us" }),
+    ]);
+    expect(f.calls).toBe(1);
+    expect(provider.docs).toHaveLength(1);
+    expect(provider.resent).toHaveLength(1);
+  });
+
+  it("sends links instead of filling the disk", async () => {
+    const f = new FakeFetcher("telegram");
+    const { provider, deliverer, records } = await setup(
+      detail([tg]),
+      [f],
+      {},
+      2,
+      {},
+      async () => 100,
+    );
+    await deliverer.deliver(1, target);
+    expect(f.calls).toBe(0);
+    expect(provider.docs).toHaveLength(0);
+    expect(provider.last()).toContain("https://t.me/BahriMed/59");
+    expect(records[0]).toMatchObject({ outcome: "links_only", error: "LowDisk" });
+  });
+
+  it("carries on when free space cannot be measured", async () => {
+    const f = new FakeFetcher("telegram");
+    const { provider, deliverer } = await setup(detail([tg]), [f], {}, 2, {}, async () => null);
+    await deliverer.deliver(1, target);
+    expect(provider.docs).toHaveLength(1);
   });
 });

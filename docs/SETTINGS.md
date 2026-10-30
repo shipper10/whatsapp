@@ -48,6 +48,9 @@
 | المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
 |---|---|---|---|---|---|
 | `delivery.concurrency` | رقم | `2` | `DELIVERY_CONCURRENCY` | نعم | Parallel file deliveries. |
+| `delivery.maxInflightMb` | رقم | `800` | `DELIVERY_MAX_INFLIGHT_MB` | لا | Total size of files being delivered at the same moment. Another large file waits in line until there is room (protects the free host's small disk). 0 = no limit. |
+| `delivery.minFreeDiskMb` | رقم | `150` | `DELIVERY_MIN_FREE_DISK_MB` | لا | A file is not downloaded when the disk would be left with less free space than this; the person gets the links instead. 0 = no check. |
+| `delivery.cacheHours` | رقم | `12` | `DELIVERY_CACHE_HOURS` | لا | A file already sent once is sent again to others by re-forwarding it inside WhatsApp, with no download or upload, for this many hours (kept in memory, so a restart clears it). 0 = off. |
 | `delivery.maxAttachmentMb` | رقم | `300` | `MAX_ATTACHMENT_SIZE_MB` | لا | Files larger than this are sent as links only (WhatsApp itself accepts up to 2000 MB; free hosts have limited time, disk and memory). |
 | `delivery.allowedMediaTypes` | قائمة | `[]` | - | لا | Which file types may be sent as real files (others get links only). Empty = all. Accepts names like pdf, docx, audio, video, image, extensions (.mp3) or MIME types (application/pdf, audio/*). Comma separated, e.g. /set delivery.allowedMediaTypes pdf,audio |
 | `delivery.audioMode` | audio \| document | `"audio"` | `DELIVERY_AUDIO_MODE` | لا | audio = sound files arrive as playable WhatsApp audio messages; document = as attachments (use if audio messages fail on your recipients' phones). |

@@ -28,12 +28,12 @@ src/library/             classify/apply (التصنيف)، albums (دمج الأ
                          (عرض الفهرس)، indexSearch (الانتقال بالاسم)، search، dbLibrary
 src/bot/                 engine (آلة الحالة)، selection (تحليل 1-5)، handler، messages، replyTracker
 src/delivery/            fileDeliverer (الطابور، التنزيل، الإرسال، الألبومات)، fetchers (تيليجرام/درايف)،
-                         audioSplit (تقسيم الصوت وتنظيف الرؤوس)، progress (رسالة الحالة)، links، typeFilter
+                         audioSplit (تقسيم الصوت وتنظيف الرؤوس)، كاش الرفع وsingle-flight داخل fileDeliverer، progress (رسالة الحالة)، links، typeFilter
 src/providers/whatsapp/  types (الواجهة المشتركة)، baileys/ (الوضع الخفيف)، openwa.ts (الوضع الكامل)
 src/admin/               أوامر المشرف
 src/jobs/                scheduler (دورات المزامنة)، keepalive
 src/http/server.ts       /، /healthz، /admin/link، /webhooks/openwa
-src/core/                normalize (عربي/إنجليزي)، session، jobQueue، retry
+src/core/                normalize (عربي/إنجليزي)، session، jobQueue (طابور موزون بميزانية بايتات)، resources (القرص/الذاكرة)، retry
 test/                    vitest (fixtures حقيقية البنية للقناة)
 scripts/                 telegram-login, drive-source, gen-settings-doc, backup/restore
 ```

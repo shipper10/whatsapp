@@ -29,6 +29,15 @@ export interface AdminDeps {
   scheduler: Pick<SyncScheduler, "runNow" | "last" | "staleKinds" | "activity">;
   bootstrapAdmins: string[];
   send: (msg: IncomingMessage, text: string) => Promise<void>;
+  /** Live load figures shown by /status (queue, memory, disk, cache). */
+  load?: () => Promise<{
+    running: number;
+    queued: number;
+    inflightMb: number;
+    cached: number;
+    rssMb: number;
+    freeDiskMb: number | null;
+  }>;
 }
 
 const HELP = `Admin commands (private chat only)
@@ -111,6 +120,12 @@ export async function runCommand(
           `⏳ ${a.kind} running ${mins} min — ${a.phase === "classify" ? "organizing the library" : (a.note ?? "reading")}`,
         );
       }
+      const load = await d.load?.();
+      if (load)
+        lines.push(
+          `📦 Deliveries: ${load.running} running, ${load.queued} waiting (${load.inflightMb} MB in flight), ${load.cached} cached`,
+          `🧠 Memory ${load.rssMb} MB${load.freeDiskMb === null ? "" : ` • free disk ${load.freeDiskMb} MB`}`,
+        );
       const stale = await d.scheduler.staleKinds();
       if (stale.length) lines.push(`⚠️ stale: ${stale.join(", ")}`);
       const srcs = await d.db.select().from(driveSources).orderBy(asc(driveSources.id));

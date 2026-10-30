@@ -13,6 +13,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import type { Db } from "../../../db/client.js";
 import type {
+  CachedSend,
   IncomingMessage,
   OutgoingDocument,
   OutgoingText,
@@ -88,6 +89,13 @@ export interface BaileysDeps {
 }
 
 const RECENT_MAX = 300;
+const CACHE_MAX = 200;
+
+interface CachedUpload {
+  msg: WAMessage;
+  followUpText?: string;
+  at: number;
+}
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const defaultBackoff = (attempt: number) => Math.min(60_000, 2_000 * 2 ** Math.min(attempt, 5));
 
@@ -102,6 +110,7 @@ export class BaileysProvider implements WhatsAppProvider {
   private recent = new Map<string, WAMessage>();
   private sendChain: Promise<unknown> = Promise.resolve();
   private readonly uploads = new UploadMeter();
+  private readonly uploaded = new Map<string, CachedUpload>();
   private lastSendAt = 0;
   private authClear: (() => Promise<void>) | null = null;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -259,7 +268,7 @@ export class BaileysProvider implements WhatsAppProvider {
    * Spaces the START of sends by the minimum gap, but lets them run side by side: a multi-minute upload
    * must not hold up every other reply.
    */
-  private async enqueue(job: () => Promise<SendResult>): Promise<SendResult> {
+  private async enqueue<T>(job: () => Promise<T>): Promise<T> {
     const slot = this.sendChain.then(async () => {
       const gap = await this.deps.minSendGapMs().catch(() => 0);
       const wait = this.lastSendAt + gap - Date.now();
@@ -291,7 +300,7 @@ export class BaileysProvider implements WhatsAppProvider {
     jid: string,
     content: AnyMessageContent,
     quoteId?: string,
-  ): Promise<SendResult> {
+  ): Promise<SendResult & { raw?: WAMessage }> {
     const sock = this.sock;
     if (!sock || this.status_.state !== "open")
       return { confirmed: false, error: "whatsapp not connected" };
@@ -300,7 +309,7 @@ export class BaileysProvider implements WhatsAppProvider {
       const sent = await sock.sendMessage(jid, content, quoted ? { quoted } : undefined);
       const id = sent?.key?.id;
       return id
-        ? { confirmed: true, providerMessageId: id }
+        ? { confirmed: true, providerMessageId: id, raw: sent }
         : { confirmed: false, error: "no message id returned" };
     } catch (e) {
       return { confirmed: false, error: e instanceof Error ? e.message : String(e) };
@@ -308,9 +317,14 @@ export class BaileysProvider implements WhatsAppProvider {
   }
 
   sendText(msg: OutgoingText): Promise<SendResult> {
-    return this.enqueue(() =>
-      this.deliver(msg.conversationId, { text: msg.text }, msg.quoteMessageId),
-    );
+    return this.enqueue(async () => {
+      const { raw: _raw, ...res } = await this.deliver(
+        msg.conversationId,
+        { text: msg.text },
+        msg.quoteMessageId,
+      );
+      return res;
+    });
   }
 
   /** Sends a file as the WhatsApp message kind that fits it (audio, video, image or document). */
@@ -336,7 +350,77 @@ export class BaileysProvider implements WhatsAppProvider {
       if (res.confirmed && plan.followUpText) {
         await this.deliver(msg.conversationId, { text: plan.followUpText }, msg.quoteMessageId);
       }
-      return res;
+      if (res.confirmed && res.raw && msg.cache) {
+        this.remember_(msg.cache.key, {
+          msg: res.raw,
+          followUpText: plan.followUpText,
+          at: Date.now(),
+        });
+      }
+      return {
+        confirmed: res.confirmed,
+        providerMessageId: res.providerMessageId,
+        error: res.error,
+      };
+    });
+  }
+
+  private remember_(key: string, v: CachedUpload): void {
+    this.uploaded.delete(key);
+    this.uploaded.set(key, v);
+    if (this.uploaded.size > CACHE_MAX) {
+      const oldest = this.uploaded.keys().next().value;
+      if (oldest !== undefined) this.uploaded.delete(oldest);
+    }
+  }
+
+  cacheSize(): number {
+    return this.uploaded.size;
+  }
+
+  /**
+   * Re-forwards a file we already uploaded: WhatsApp reuses the stored media, so nothing is downloaded
+   * from Telegram/Drive and nothing is uploaded again. Any failure returns null and the caller sends normally.
+   */
+  sendCached(msg: CachedSend): Promise<SendResult | null> {
+    const hit = this.uploaded.get(msg.cache.key);
+    if (!hit) return Promise.resolve(null);
+    if (Date.now() - hit.at > msg.cache.ttlMs) {
+      this.uploaded.delete(msg.cache.key);
+      return Promise.resolve(null);
+    }
+    return this.enqueue(async () => {
+      const m = hit.msg.message as Record<string, Record<string, unknown> | undefined> | undefined;
+      const kind = m && ["documentMessage", "videoMessage", "imageMessage"].find((k) => m[k]);
+      // Same file, the caption of THIS request.
+      const forward =
+        kind && m
+          ? ({
+              ...hit.msg,
+              message: { [kind]: { ...m[kind], caption: msg.caption ?? "" } },
+            } as WAMessage)
+          : hit.msg;
+      const res = await this.deliver(
+        msg.conversationId,
+        { forward } as AnyMessageContent,
+        msg.quoteMessageId,
+      );
+      if (!res.confirmed) {
+        this.uploaded.delete(msg.cache.key);
+        this.deps.logger.warn(
+          { error: res.error },
+          "re-forwarding a cached file failed; sending normally",
+        );
+        return null;
+      }
+      if (!kind && (hit.followUpText ?? msg.caption)) {
+        await this.deliver(
+          msg.conversationId,
+          { text: msg.caption ?? hit.followUpText ?? "" },
+          msg.quoteMessageId,
+        );
+      }
+      return { confirmed: true, providerMessageId: res.providerMessageId };
     });
   }
 

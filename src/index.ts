@@ -5,6 +5,7 @@ import { createAdminHook } from "./admin/commands.js";
 import { createHandler } from "./bot/handler.js";
 import { ReplyTracker } from "./bot/replyTracker.js";
 import { loadEnv } from "./config/env.js";
+import { freeDiskMb, rssMb } from "./core/resources.js";
 import { DbSessionStore } from "./core/session/store.js";
 import { createDb } from "./db/client.js";
 import { DbDeliveryLog } from "./delivery/dbLog.js";
@@ -154,6 +155,17 @@ const adminHook = createAdminHook({
   settings,
   scheduler,
   bootstrapAdmins: env.ADMIN_IDS,
+  load: async () => {
+    const st = deliverer.stats();
+    return {
+      running: st.running,
+      queued: st.queued,
+      inflightMb: Math.round(st.inflightBytes / 1048576),
+      cached: st.cached,
+      rssMb: rssMb(),
+      freeDiskMb: await freeDiskMb(env.TEMP_FILE_DIR),
+    };
+  },
   send: async (msg, text) => {
     await provider.sendText({ conversationId: msg.conversationId, text });
   },

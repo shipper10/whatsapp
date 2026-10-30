@@ -95,6 +95,30 @@ export const settingsRegistry = {
     restart: true,
     description: "Parallel file deliveries.",
   }),
+  "delivery.maxInflightMb": def({
+    schema: z.coerce.number().int().min(0).max(20000),
+    default: 800,
+    envName: "DELIVERY_MAX_INFLIGHT_MB",
+    restart: false,
+    description:
+      "Total size of files being delivered at the same moment. Another large file waits in line until there is room (protects the free host's small disk). 0 = no limit.",
+  }),
+  "delivery.minFreeDiskMb": def({
+    schema: z.coerce.number().int().min(0).max(20000),
+    default: 150,
+    envName: "DELIVERY_MIN_FREE_DISK_MB",
+    restart: false,
+    description:
+      "A file is not downloaded when the disk would be left with less free space than this; the person gets the links instead. 0 = no check.",
+  }),
+  "delivery.cacheHours": def({
+    schema: z.coerce.number().min(0).max(720),
+    default: 12,
+    envName: "DELIVERY_CACHE_HOURS",
+    restart: false,
+    description:
+      "A file already sent once is sent again to others by re-forwarding it inside WhatsApp, with no download or upload, for this many hours (kept in memory, so a restart clears it). 0 = off.",
+  }),
   "delivery.maxAttachmentMb": def({
     schema: z.coerce.number().int().min(1).max(2000),
     default: 300,

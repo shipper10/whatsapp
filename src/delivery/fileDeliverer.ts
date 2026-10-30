@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { t } from "../bot/messages.js";
 import type { LibraryPort } from "../bot/types.js";
 import { JobQueue } from "../core/jobQueue.js";
+import { freeDiskMb } from "../core/resources.js";
 import type { ResourceDetail, ResourceSourceDetail } from "../library/browse.js";
 import { cleanCaption } from "../library/indexView.js";
 import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
@@ -30,6 +31,8 @@ export interface FileDelivererDeps {
   tempDir: string;
   concurrency: number;
   logger: { warn: (o: object, m?: string) => void };
+  /** Test hook; defaults to the real free space of the temp disk. */
+  freeDiskMb?: (dir: string) => Promise<number | null>;
 }
 
 /** Short, user-safe failure label. Raw errors (paths, tokens, stack traces) never reach logs or users. */
@@ -43,8 +46,20 @@ const sanitize = (err: unknown) =>
  */
 export class FileDeliverer implements Deliverer {
   private readonly queue: JobQueue;
+  /** Files being fetched right now, so a second request for the same file waits and then reuses the upload. */
+  private readonly flights = new Map<string, Promise<void>>();
   constructor(private readonly d: FileDelivererDeps) {
     this.queue = new JobQueue(d.concurrency);
+  }
+
+  /** Live load figures for /status. */
+  stats() {
+    return {
+      running: this.queue.running,
+      queued: this.queue.queued,
+      inflightBytes: this.queue.inflight,
+      cached: this.d.provider.cacheSize?.() ?? 0,
+    };
   }
 
   async deliver(resourceId: number, target: DeliveryTarget): Promise<void> {
@@ -148,9 +163,11 @@ export class FileDeliverer implements Deliverer {
       const caption = buildCaption(detail, flags);
       const first = detail.sources.find((x) => x.deliveryEligible);
       target.progress?.file(first?.fileName ?? detail.displayName, first?.sizeBytes ?? null);
+      this.queue.setBudget((await this.d.settings.get("delivery.maxInflightMb")) * 1024 * 1024);
       const r = await this.queue.run(
         () => this.tryAttachment(detail, target, caption),
         (pos) => target.progress?.queued(pos),
+        first?.sizeBytes ?? 0,
       );
       status = r.status;
       error = r.error;
@@ -224,6 +241,69 @@ export class FileDeliverer implements Deliverer {
     )
       return { status: "too_large" };
 
+    // A file we uploaded recently is re-forwarded inside WhatsApp: no download, no upload.
+    const top = typeOk[0] as (typeof typeOk)[number];
+    const ttlMs = (await this.d.settings.get("delivery.cacheHours")) * 3600_000;
+    const key = ttlMs > 0 ? cacheKeyOf(top.src) : null;
+    let release = () => {};
+    const done = () => {
+      release();
+      if (key && this.flights.get(key) === mine) this.flights.delete(key);
+    };
+    let mine: Promise<void> | undefined;
+    if (key) {
+      // Registered before any await, so a second request for the same file always sees this one.
+      const prev = this.flights.get(key);
+      mine = new Promise<void>((r) => {
+        release = r;
+      });
+      this.flights.set(key, mine);
+      await prev;
+      const hit = await this.d.provider
+        .sendCached?.({
+          conversationId: target.conversationId,
+          cache: { key, ttlMs },
+          caption,
+          quoteMessageId: target.quoteMessageId,
+        })
+        .catch(() => null);
+      if (hit?.confirmed) {
+        done();
+        return { status: "sent" };
+      }
+    }
+    try {
+      return await this.transfer(typeOk, {
+        target,
+        caption,
+        maxBytes,
+        timeoutS,
+        audioMode,
+        splitAudioOn,
+        lang,
+        partMb,
+        cache: key ? { key, ttlMs } : undefined,
+      });
+    } finally {
+      if (key) done();
+    }
+  }
+
+  private async transfer(
+    typeOk: { src: ResourceSourceDetail; fetcher: FileFetcher }[],
+    o: {
+      target: DeliveryTarget;
+      caption: string;
+      maxBytes: number;
+      timeoutS: number;
+      audioMode: "audio" | "document";
+      splitAudioOn: boolean;
+      lang: "ar" | "en";
+      partMb: number;
+      cache?: { key: string; ttlMs: number };
+    },
+  ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
+    const { target, caption, maxBytes, timeoutS, audioMode, splitAudioOn, lang, partMb } = o;
     // Without a progress reporter, big files at least get a one-line heads-up.
     if (!target.progress && (typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
       await this.d.provider.sendText({
@@ -235,6 +315,18 @@ export class FileDeliverer implements Deliverer {
 
     let lastError: string | undefined;
     for (const { src, fetcher } of typeOk.slice(0, 2)) {
+      // Disk guard: never start a download that would leave the disk (nearly) full.
+      const minFree = await this.d.settings.get("delivery.minFreeDiskMb");
+      if (minFree > 0) {
+        await mkdir(this.d.tempDir, { recursive: true });
+        const free = await (this.d.freeDiskMb ?? freeDiskMb)(this.d.tempDir);
+        const need = (src.sizeBytes ?? 0) / (1024 * 1024) + minFree;
+        if (free !== null && free < need) {
+          this.d.logger.warn({ freeMb: free, needMb: Math.round(need) }, "low disk, sending links");
+          lastError = "LowDisk";
+          break;
+        }
+      }
       const dir = await mkdtemp(join(this.d.tempDir, "dl-"));
       const ctl = new AbortController();
       // Stall timeout: the clock restarts whenever bytes arrive, so a big file that keeps flowing is fine.
@@ -281,6 +373,7 @@ export class FileDeliverer implements Deliverer {
           quoteMessageId: target.quoteMessageId,
           audioAsDocument: audioMode === "document",
           onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
+          cache: o.cache,
         });
         if (res.confirmed) return { status: "sent" };
         lastError = res.error ?? "SendNotConfirmed";
@@ -353,3 +446,12 @@ export function buildCaption(detail: ResourceDetail, flags: LinkFlags): string {
 
 const waitNotice = (l: "ar" | "en") =>
   l === "ar" ? "⏳ جاري تجهيز الملف…" : "⏳ Preparing the file…";
+
+/** Identifies the exact stored file (source + id + size) so a changed file is never served from the cache. */
+function cacheKeyOf(src: ResourceSourceDetail): string | null {
+  if (src.type === "telegram" && src.telegramChatId !== null && src.telegramMessageId !== null)
+    return `tg:${src.telegramChatId}:${src.telegramMessageId}:${src.sizeBytes ?? 0}`;
+  if (src.type === "google_drive" && src.driveFileId)
+    return `drive:${src.driveFileId}:${src.sizeBytes ?? 0}`;
+  return null;
+}

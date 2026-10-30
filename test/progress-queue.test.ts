@@ -33,6 +33,32 @@ describe("JobQueue", () => {
     expect(q.running).toBe(0);
   });
 
+  it("holds a big job back while the in-flight budget is used, but never starves a lone one", async () => {
+    const q = new JobQueue(5);
+    q.setBudget(100);
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const a = q.run(
+      async () => {
+        order.push("a");
+        await gate;
+      },
+      undefined,
+      80,
+    );
+    const b = q.run(async () => void order.push("b"), undefined, 50);
+    const small = q.run(async () => void order.push("small"), undefined, 5);
+    await tick();
+    expect(order).toEqual(["a"]); // b does not fit; small waits behind b (FIFO)
+    expect(q.inflight).toBe(80);
+    release();
+    await Promise.all([a, b, small]);
+    expect(order).toEqual(["a", "b", "small"]);
+    expect(q.inflight).toBe(0);
+    await expect(q.run(async () => "huge", undefined, 1000)).resolves.toBe("huge");
+  });
+
   it("frees the slot when a job throws", async () => {
     const q = new JobQueue(1);
     await expect(q.run(async () => Promise.reject(new Error("x")))).rejects.toThrow();

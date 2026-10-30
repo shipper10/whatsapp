@@ -37,6 +37,16 @@ export interface OutgoingDocument {
   audioAsDocument?: boolean;
   /** Called about once a second while the file is being uploaded to WhatsApp. */
   onUploadProgress?: (sentBytes: number, totalBytes: number) => void;
+  /** When set, a confirmed send is remembered under this key so it can be re-sent without uploading. */
+  cache?: { key: string; ttlMs: number };
+}
+
+/** Re-sends a file this bot already uploaded (same key, still fresh) without downloading or uploading it. */
+export interface CachedSend {
+  conversationId: string;
+  cache: { key: string; ttlMs: number };
+  caption?: string;
+  quoteMessageId?: string;
 }
 
 export interface SendResult {
@@ -52,4 +62,8 @@ export interface WhatsAppProvider {
   sendDocument(msg: OutgoingDocument): Promise<SendResult>;
   /** Replaces the text of a message this bot sent (status/progress messages). Returns false if not possible. */
   editText?(conversationId: string, messageId: string, text: string): Promise<boolean>;
+  /** Returns null when nothing fresh is cached (or re-sending failed), so the caller sends normally. */
+  sendCached?(msg: CachedSend): Promise<SendResult | null>;
+  /** Number of files currently remembered for re-sending. */
+  cacheSize?(): number;
 }

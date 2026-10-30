@@ -43,6 +43,15 @@ export class FakeProvider implements WhatsAppProvider {
   }
   async sendDocument(m: OutgoingDocument): Promise<SendResult> {
     this.docs.push(m);
+    if (m.cache) this.cached.set(m.cache.key, true);
+    return { confirmed: true };
+  }
+  /** Keys remembered for re-sending, and the re-sends that happened. */
+  cached = new Map<string, boolean>();
+  resent: { key: string; caption?: string }[] = [];
+  async sendCached(m: { cache: { key: string }; caption?: string }): Promise<SendResult | null> {
+    if (!this.cached.has(m.cache.key)) return null;
+    this.resent.push({ key: m.cache.key, caption: m.caption });
     return { confirmed: true };
   }
   last() {
