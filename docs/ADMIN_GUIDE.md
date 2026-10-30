@@ -50,7 +50,8 @@
 | `delivery.concurrency` | عدد عمليات الإرسال المتوازية (يحتاج إعادة تشغيل). 1 للاستضافة الصغيرة |
 | `delivery.timeoutSeconds` | مهلة «بلا تقدم» في التنزيل (تُجدَّد كلما وصلت بايتات) |
 | `delivery.progress` / `delivery.progressMinMb` | إظهار رسالة التقدم، والحد الأدنى لحجم الملف المفرد لإظهارها |
-| `delivery.splitLargeAudio` | تقسيم الصوت فوق 16MB إلى أجزاء (`false` = روابط فقط) |
+| `delivery.largeAudioMode` | الصوت فوق 16MB: `split` أجزاء بالترتيب (الافتراضي) / `document` الملف كاملًا مرفقًا بلا تقسيم (تجريبي) / `links` روابط فقط. حد 16MB للصوت فقط؛ الفيديو والمستندات تصل حتى `delivery.maxAttachmentMb` |
+| `delivery.opusAsMp3` | تجريبي: إرسال opus/ogg مرفقًا باسم `.mp3` (تغيير الاسم فقط دون المساس بالبايتات) التفافًا على رفض واتساب لـ opus |
 | `delivery.audioPartMb` | حجم الجزء عند التقسيم (2 إلى 15) |
 | `delivery.audioMode` | `audio` رسالة صوتية (الافتراضي) أو `document` مرفقًا |
 | `delivery.driveDownload` | السماح بتنزيل ملفات درايف وإرسالها (متوقف افتراضيًا) |

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ReplyTracker } from "../src/bot/replyTracker.js";
 import type { LibraryPort } from "../src/bot/types.js";
 import {
   FetchTooLargeError,
@@ -437,5 +438,83 @@ describe("load protection and reuse", () => {
     const { provider, deliverer } = await setup(detail([tg]), [f], {}, 2, {}, async () => null);
     await deliverer.deliver(1, target);
     expect(provider.docs).toHaveLength(1);
+  });
+});
+
+describe("size limits by kind", () => {
+  const big = 40 * 1024 * 1024;
+  class BigFetcher extends FakeFetcher {
+    constructor(
+      private name: string,
+      private mime: string,
+    ) {
+      super("telegram");
+    }
+    async fetch(s: ResourceSourceDetail, dir: string) {
+      const path = join(dir, this.name);
+      writeFileSync(path, "x");
+      return { path, fileName: this.name, mimeType: this.mime, sizeBytes: s.sizeBytes ?? 1 };
+    }
+  }
+  const src = (name: string, mime: string): ResourceSourceDetail => ({
+    ...tg,
+    fileName: name,
+    mimeType: mime,
+    sizeBytes: big,
+  });
+
+  it("sends a 40 MB video as a file (the 16 MB limit is for audio only)", async () => {
+    const { provider, deliverer } = await setup(
+      detail([src("lecture.mp4", "video/mp4")]),
+      [new BigFetcher("lecture.mp4", "video/mp4")],
+      { "delivery.largeAudioMode": "links" },
+    );
+    await deliverer.deliver(1, target);
+    expect(provider.docs).toHaveLength(1);
+  });
+
+  it("sends big audio whole as a document when the mode says so", async () => {
+    const { provider, deliverer } = await setup(
+      detail([src("talk.mp3", "audio/mpeg")]),
+      [new BigFetcher("talk.mp3", "audio/mpeg")],
+      { "delivery.largeAudioMode": "document" },
+    );
+    await deliverer.deliver(1, target);
+    expect(provider.docs).toHaveLength(1);
+    expect(provider.docs[0]?.fileName).toBe("talk.mp3");
+  });
+
+  it("gives links only for big audio when the mode is links", async () => {
+    const f = new BigFetcher("talk.mp3", "audio/mpeg");
+    const { provider, deliverer } = await setup(detail([src("talk.mp3", "audio/mpeg")]), [f], {
+      "delivery.largeAudioMode": "links",
+    });
+    await deliverer.deliver(1, target);
+    expect(provider.docs).toHaveLength(0);
+    expect(f.calls).toBe(0);
+  });
+
+  it("passes the opus-as-mp3 flag to the provider", async () => {
+    const { provider, deliverer } = await setup(
+      detail([{ ...src("a.opus", "audio/ogg"), sizeBytes: 1000 }]),
+      [new BigFetcher("a.opus", "audio/ogg")],
+      { "delivery.opusAsMp3": true },
+    );
+    await deliverer.deliver(1, target);
+    expect(provider.docs[0]?.opusAsMp3).toBe(true);
+  });
+});
+
+describe("ReplyTracker wrapper", () => {
+  it("keeps the upload cache capabilities of the wrapped provider", async () => {
+    const inner = new FakeProvider();
+    inner.cached.set("k", true);
+    const wrapped = new ReplyTracker().wrap(inner);
+    expect(
+      await wrapped.sendCached?.({ conversationId: "c", cache: { key: "k", ttlMs: 1 } }),
+    ).toMatchObject({
+      confirmed: true,
+    });
+    expect(wrapped.cacheSize).toBeTypeOf("function");
   });
 });

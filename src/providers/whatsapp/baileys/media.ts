@@ -13,6 +13,8 @@ export interface MediaInput {
   head?: Buffer;
   /** Send audio as a document (attachment) instead of an audio message. */
   audioAsDocument?: boolean;
+  /** Send Ogg/Opus as an attachment whose name ends in .mp3 (name change only). */
+  opusAsMp3?: boolean;
 }
 
 export interface MediaPlan {
@@ -107,6 +109,17 @@ export function planMedia(m: MediaInput): MediaPlan {
   // Audio: trust the bytes over the name. Ogg/Opus is always sent as .ogg (WhatsApp rejects a bare ".opus").
   const sniffed = sniffAudio(m.head);
   if (sniffed === "ogg-opus" || sniffed === "ogg-other" || ext === "opus" || ext === "oga") {
+    if (m.opusAsMp3) {
+      return {
+        kind: "document",
+        content: {
+          document: source,
+          mimetype: "audio/mpeg",
+          fileName: `${fileName.replace(/\.[a-z0-9]{1,6}$/i, "")}.mp3`,
+          caption: m.caption,
+        },
+      };
+    }
     if (ext !== "ogg") fileName = fileName.replace(/\.[a-z0-9]{1,6}$/i, "") + ".ogg";
     ext = "ogg";
   }

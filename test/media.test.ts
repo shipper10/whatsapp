@@ -116,3 +116,27 @@ describe("audio sniffing", () => {
     ).toBe("document");
   });
 });
+
+describe("opus as mp3 and big videos", () => {
+  it("sends opus as an .mp3 attachment when asked (name only)", () => {
+    const head = Buffer.concat([Buffer.from("OggS"), Buffer.alloc(24), Buffer.from("OpusHead")]);
+    const plan = planMedia({
+      filePath: "/t/a.opus",
+      fileName: "lecture.opus",
+      head,
+      sizeBytes: 1000,
+      opusAsMp3: true,
+    });
+    expect(plan.kind).toBe("document");
+    expect(plan.content).toMatchObject({ fileName: "lecture.mp3", mimetype: "audio/mpeg" });
+  });
+  it("sends a 100 MB mp4 as a document, not blocked", () => {
+    const plan = planMedia({
+      filePath: "/t/v.mp4",
+      fileName: "v.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 100 * 1024 * 1024,
+    });
+    expect(plan.kind).toBe("document");
+  });
+});

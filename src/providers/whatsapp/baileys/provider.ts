@@ -10,6 +10,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  normalizeMessageContent,
 } from "@whiskeysockets/baileys";
 import type { Db } from "../../../db/client.js";
 import type {
@@ -342,6 +343,7 @@ export class BaileysProvider implements WhatsAppProvider {
         sizeBytes: size,
         head,
         audioAsDocument: msg.audioAsDocument,
+        opusAsMp3: msg.opusAsMp3,
       });
       this.deps.logger.info({ kind: plan.kind, size, name: msg.fileName }, "sending file");
       const res = await this.uploads.measure(size ?? 0, msg.onUploadProgress, () =>
@@ -390,7 +392,10 @@ export class BaileysProvider implements WhatsAppProvider {
       return Promise.resolve(null);
     }
     return this.enqueue(async () => {
-      const m = hit.msg.message as Record<string, Record<string, unknown> | undefined> | undefined;
+      // Documents with a caption arrive wrapped; unwrap so the caption can be replaced.
+      const m = normalizeMessageContent(hit.msg.message) as
+        | Record<string, Record<string, unknown> | undefined>
+        | undefined;
       const kind = m && ["documentMessage", "videoMessage", "imageMessage"].find((k) => m[k]);
       // Same file, the caption of THIS request.
       const forward =
@@ -420,6 +425,7 @@ export class BaileysProvider implements WhatsAppProvider {
           msg.quoteMessageId,
         );
       }
+      this.deps.logger.info({ key: msg.cache.key }, "re-sent a cached upload");
       return { confirmed: true, providerMessageId: res.providerMessageId };
     });
   }

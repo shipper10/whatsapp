@@ -198,14 +198,15 @@ export class FileDeliverer implements Deliverer {
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
   }> {
-    const [maxMb, allowed, timeoutS, driveOn, audioMode, splitAudioOn, lang, partMb] =
+    const [maxMb, allowed, timeoutS, driveOn, audioMode, largeAudio, opusAsMp3, lang, partMb] =
       await Promise.all([
         this.d.settings.get("delivery.maxAttachmentMb"),
         this.d.settings.get("delivery.allowedMediaTypes"),
         this.d.settings.get("delivery.timeoutSeconds"),
         this.d.settings.get("delivery.driveDownload"),
         this.d.settings.get("delivery.audioMode"),
-        this.d.settings.get("delivery.splitLargeAudio"),
+        this.d.settings.get("delivery.largeAudioMode"),
+        this.d.settings.get("delivery.opusAsMp3"),
         this.d.settings.get("bot.language"),
         this.d.settings.get("delivery.audioPartMb"),
       ]);
@@ -232,7 +233,7 @@ export class FileDeliverer implements Deliverer {
 
     // Audio over WhatsApp's 16 MB limit cannot be opened by the recipient: split it, or give links only.
     if (
-      !splitAudioOn &&
+      largeAudio === "links" &&
       typeOk.every(
         (c) =>
           looksLikeAudio(c.src.mimeType, c.src.fileName ?? "") &&
@@ -279,7 +280,8 @@ export class FileDeliverer implements Deliverer {
         maxBytes,
         timeoutS,
         audioMode,
-        splitAudioOn,
+        largeAudio,
+        opusAsMp3,
         lang,
         partMb,
         cache: key ? { key, ttlMs } : undefined,
@@ -297,13 +299,15 @@ export class FileDeliverer implements Deliverer {
       maxBytes: number;
       timeoutS: number;
       audioMode: "audio" | "document";
-      splitAudioOn: boolean;
+      largeAudio: "split" | "document" | "links";
+      opusAsMp3: boolean;
       lang: "ar" | "en";
       partMb: number;
       cache?: { key: string; ttlMs: number };
     },
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
-    const { target, caption, maxBytes, timeoutS, audioMode, splitAudioOn, lang, partMb } = o;
+    const { target, caption, maxBytes, timeoutS, audioMode, largeAudio, opusAsMp3, lang, partMb } =
+      o;
     // Without a progress reporter, big files at least get a one-line heads-up.
     if (!target.progress && (typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
       await this.d.provider.sendText({
@@ -356,8 +360,19 @@ export class FileDeliverer implements Deliverer {
         }
         clearTimeout(timer);
         if (looksLikeAudio(file.mimeType, file.fileName) && file.sizeBytes > AUDIO_INLINE_MAX) {
-          if (!splitAudioOn) return { status: "too_large" };
-          return await this.sendAudioParts(file, dir, caption, target, audioMode, lang, partMb);
+          if (largeAudio === "links") return { status: "too_large" };
+          if (largeAudio === "split")
+            return await this.sendAudioParts(
+              file,
+              dir,
+              caption,
+              target,
+              audioMode,
+              lang,
+              partMb,
+              opusAsMp3,
+            );
+          // "document": the whole file as one attachment (planMedia sends anything over the limit that way).
         }
         // Opus files with a huge tags block (cover art) are unplayable on WhatsApp; send a cleaned copy.
         const cleaned = looksLikeAudio(file.mimeType, file.fileName)
@@ -372,6 +387,7 @@ export class FileDeliverer implements Deliverer {
           caption,
           quoteMessageId: target.quoteMessageId,
           audioAsDocument: audioMode === "document",
+          opusAsMp3,
           onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
           cache: o.cache,
         });
@@ -397,6 +413,7 @@ export class FileDeliverer implements Deliverer {
     audioMode: "audio" | "document",
     lang: "ar" | "en",
     partMb: number,
+    opusAsMp3 = false,
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
     const split = await splitAudio(file.path, file.fileName, dir, partMb * 1000 * 1000).catch(
       () => null,
@@ -418,6 +435,7 @@ export class FileDeliverer implements Deliverer {
         caption: partLabel(lang, i + 1, n),
         quoteMessageId: target.quoteMessageId,
         audioAsDocument: audioMode === "document",
+        opusAsMp3,
         onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
       });
       if (!res.confirmed) return { status: "failed", error: res.error ?? "SendNotConfirmed" };

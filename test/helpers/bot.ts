@@ -46,6 +46,9 @@ export class FakeProvider implements WhatsAppProvider {
     if (m.cache) this.cached.set(m.cache.key, true);
     return { confirmed: true };
   }
+  cacheSize() {
+    return this.cached.size;
+  }
   /** Keys remembered for re-sending, and the re-sends that happened. */
   cached = new Map<string, boolean>();
   resent: { key: string; caption?: string }[] = [];

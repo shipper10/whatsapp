@@ -35,6 +35,8 @@ export interface OutgoingDocument {
   quoteMessageId?: string;
   /** Send audio files as attachments rather than playable audio messages. */
   audioAsDocument?: boolean;
+  /** Ogg/Opus goes as an attachment renamed to .mp3 (name change only). */
+  opusAsMp3?: boolean;
   /** Called about once a second while the file is being uploaded to WhatsApp. */
   onUploadProgress?: (sentBytes: number, totalBytes: number) => void;
   /** When set, a confirmed send is remembered under this key so it can be re-sent without uploading. */

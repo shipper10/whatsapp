@@ -142,13 +142,21 @@ export const settingsRegistry = {
     description:
       "audio = sound files arrive as playable WhatsApp audio messages; document = as attachments (use if audio messages fail on your recipients' phones).",
   }),
-  "delivery.splitLargeAudio": def({
-    schema: z.boolean(),
-    default: true,
-    envName: "DELIVERY_SPLIT_AUDIO",
+  "delivery.largeAudioMode": def({
+    schema: z.enum(["split", "document", "links"]),
+    default: "split",
+    envName: "DELIVERY_LARGE_AUDIO_MODE",
     restart: false,
     description:
-      "Audio over 16 MB (WhatsApp's limit) is sent as ordered parts, cut without re-encoding. false = links only for such files.",
+      "What to do with audio over 16 MB (WhatsApp plays only up to 16 MB inline): split = ordered parts cut without re-encoding; document = the whole file as one attachment, no splitting (experimental: it opens in a player app, not WhatsApp's own player); links = links only. Videos and other files are not affected by this limit.",
+  }),
+  "delivery.opusAsMp3": def({
+    schema: z.boolean(),
+    default: false,
+    envName: "DELIVERY_OPUS_AS_MP3",
+    restart: false,
+    description:
+      "Experimental: send .opus/.ogg audio as an attachment renamed to .mp3 (only the name changes, the bytes are untouched), as a workaround for WhatsApp refusing opus files. Players that sniff the content still play it.",
   }),
   "delivery.audioPartMb": def({
     schema: z.coerce.number().int().min(2).max(15),

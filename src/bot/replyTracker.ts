@@ -50,6 +50,15 @@ export class ReplyTracker {
         return res;
       },
     };
+    // Optional capabilities must survive the wrapper, or features such as the upload cache silently stop working.
+    if (inner.sendCached) {
+      wrapped.sendCached = async (m) => {
+        const res = await inner.sendCached?.(m);
+        if (res) this.track(m.quoteMessageId, res);
+        return res ?? null;
+      };
+    }
+    if (inner.cacheSize) wrapped.cacheSize = () => inner.cacheSize?.() ?? 0;
     if (inner.editText)
       wrapped.editText = (c, id, text) => inner.editText?.(c, id, text) ?? Promise.resolve(false);
     return wrapped;

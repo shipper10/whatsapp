@@ -16,7 +16,6 @@ const EXT: Record<string, AudioFormat> = {
   amr: "amr",
   wav: "wav",
   m4a: "m4a",
-  mp4: "m4a",
 };
 
 const extOf = (n: string) => /\.([a-z0-9]{1,6})$/i.exec(n)?.[1]?.toLowerCase() ?? "";
@@ -34,8 +33,10 @@ export function audioFormat(fileName: string, head: Buffer): AudioFormat | null 
   return EXT[extOf(fileName)] ?? null;
 }
 
+/** Videos (mp4, mov...) are never audio, whatever their size: only audio has the 16 MB inline limit. */
 export const looksLikeAudio = (mime: string | null, fileName: string) =>
-  (mime?.startsWith("audio/") ?? false) || extOf(fileName) in EXT;
+  !(mime?.startsWith("video/") ?? false) &&
+  ((mime?.startsWith("audio/") ?? false) || extOf(fileName) in EXT);
 
 async function readAt(fh: FileHandle, pos: number, len: number): Promise<Buffer> {
   const buf = Buffer.alloc(len);
