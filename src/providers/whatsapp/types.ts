@@ -35,6 +35,8 @@ export interface OutgoingDocument {
   quoteMessageId?: string;
   /** Send audio files as attachments rather than playable audio messages. */
   audioAsDocument?: boolean;
+  /** Called about once a second while the file is being uploaded to WhatsApp. */
+  onUploadProgress?: (sentBytes: number, totalBytes: number) => void;
 }
 
 export interface SendResult {

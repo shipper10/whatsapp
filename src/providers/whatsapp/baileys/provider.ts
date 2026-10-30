@@ -22,6 +22,7 @@ import type {
 import { useDbAuthState } from "./authState.js";
 import { extractIncoming } from "./extract.js";
 import { planMedia } from "./media.js";
+import { UploadMeter } from "./uploadMeter.js";
 
 async function readHead(path: string, n: number): Promise<Buffer | undefined> {
   try {
@@ -100,6 +101,7 @@ export class BaileysProvider implements WhatsAppProvider {
   /** Recent inbound messages, kept only so replies can quote the asker. */
   private recent = new Map<string, WAMessage>();
   private sendChain: Promise<unknown> = Promise.resolve();
+  private readonly uploads = new UploadMeter();
   private lastSendAt = 0;
   private authClear: (() => Promise<void>) | null = null;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -234,6 +236,7 @@ export class BaileysProvider implements WhatsAppProvider {
       browser: Browsers.ubuntu("Chrome"),
       printQRInTerminal: false,
       markOnlineOnConnect: false,
+      fetchAgent: this.uploads,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       shouldIgnoreJid: (jid: string) =>
@@ -327,7 +330,9 @@ export class BaileysProvider implements WhatsAppProvider {
         audioAsDocument: msg.audioAsDocument,
       });
       this.deps.logger.info({ kind: plan.kind, size, name: msg.fileName }, "sending file");
-      const res = await this.deliver(msg.conversationId, plan.content, msg.quoteMessageId);
+      const res = await this.uploads.measure(size ?? 0, msg.onUploadProgress, () =>
+        this.deliver(msg.conversationId, plan.content, msg.quoteMessageId),
+      );
       if (res.confirmed && plan.followUpText) {
         await this.deliver(msg.conversationId, { text: plan.followUpText }, msg.quoteMessageId);
       }

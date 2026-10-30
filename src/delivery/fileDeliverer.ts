@@ -280,6 +280,7 @@ export class FileDeliverer implements Deliverer {
           caption,
           quoteMessageId: target.quoteMessageId,
           audioAsDocument: audioMode === "document",
+          onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
         });
         if (res.confirmed) return { status: "sent" };
         lastError = res.error ?? "SendNotConfirmed";
@@ -324,6 +325,7 @@ export class FileDeliverer implements Deliverer {
         caption: partLabel(lang, i + 1, n),
         quoteMessageId: target.quoteMessageId,
         audioAsDocument: audioMode === "document",
+        onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
       });
       if (!res.confirmed) return { status: "failed", error: res.error ?? "SendNotConfirmed" };
     }

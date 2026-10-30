@@ -11,6 +11,8 @@ export interface ProgressSink {
   downloading(done: number, total: number | null): void;
   /** Resolves once the "sending" status is visible, so the file never lands before its status. */
   uploading(): Promise<void>;
+  /** Bytes handed to WhatsApp so far (reported about once a second while sending). */
+  uploadProgress?(sent: number, total: number): void;
   fileDone(ok: boolean): void;
   end(): Promise<void>;
 }
@@ -33,6 +35,14 @@ const fmtMb = (n: number) => `${(n / MB).toFixed(n >= 10 * MB ? 0 : 1)}`;
 const bar = (pct: number) => {
   const step = Math.max(0, Math.min(10, Math.floor(pct / 10)));
   return `[${"█".repeat(step)}${"░".repeat(10 - step)}] ${step * 10}%`;
+};
+const fmtDur = (s: number, ar: boolean) => {
+  const r = Math.max(1, Math.round(s));
+  if (r < 90) return ar ? `${r} ث` : `${r}s`;
+  const m = Math.round(r / 60);
+  if (m < 90) return ar ? `${m} د` : `${m} min`;
+  const h = Math.floor(m / 60);
+  return ar ? `${h} س ${m % 60} د` : `${h}h ${m % 60}m`;
 };
 const clip = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -64,6 +74,11 @@ export class WhatsAppProgress implements ProgressSink {
   private pending: NodeJS.Timeout | null = null;
   private ticker: NodeJS.Timeout | null = null;
   private uploadStartedAt = 0;
+  private upSent = 0;
+  private upTotal = 0;
+  private speed = 0; // bytes/second, smoothed
+  private lastSample: { at: number; sent: number } | null = null;
+  private lastAdvanceAt = 0;
   private chain: Promise<void> = Promise.resolve();
   private readonly gap: number;
   private readonly now: () => number;
@@ -114,10 +129,28 @@ export class WhatsAppProgress implements ProgressSink {
     this.refresh();
   }
 
+  uploadProgress(sent: number, total: number) {
+    const now = this.now();
+    if (this.lastSample && now > this.lastSample.at) {
+      const inst = ((sent - this.lastSample.sent) * 1000) / (now - this.lastSample.at);
+      this.speed = this.speed === 0 ? inst : this.speed * 0.7 + inst * 0.3;
+    }
+    if (sent > this.upSent) this.lastAdvanceAt = now;
+    this.lastSample = { at: now, sent };
+    this.upSent = sent;
+    this.upTotal = total;
+    this.refresh();
+  }
+
   async uploading() {
     this.phase = "upload";
     this.uploadStartedAt = this.now();
-    this.ticker ??= setInterval(() => this.refresh(), 15000);
+    this.upSent = 0;
+    this.upTotal = 0;
+    this.speed = 0;
+    this.lastSample = null;
+    this.lastAdvanceAt = this.uploadStartedAt;
+    this.ticker ??= setInterval(() => this.refresh(), 5000); // keeps "connecting (Ns)" alive before bytes flow
     this.ticker.unref?.();
     this.refresh(true);
     // Wait (briefly) for the edit to land so the status is never behind the file itself.
@@ -177,19 +210,47 @@ export class WhatsAppProgress implements ProgressSink {
           ? `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"} ${bar((this.done / t) * 100)} (${fmtMb(t)} MB)`
           : `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"}…`;
     } else if (this.phase === "upload") {
-      const s = Math.round((this.now() - this.uploadStartedAt) / 1000);
-      line = ar ? `⬆️ جاري الإرسال إلى واتساب… ${s}ث` : `⬆️ Sending to WhatsApp… ${s}s`;
+      line = this.uploadLine(ar);
     } else {
       line = ar ? "⏳ جاري التجهيز…" : "⏳ Getting ready…";
     }
     return `${head}\n${line}`;
   }
 
+  private uploadLine(ar: boolean): string {
+    const now = this.now();
+    const secs = Math.round((now - this.uploadStartedAt) / 1000);
+    const head = ar ? "⬆️ إرسال" : "⬆️ Sending";
+    if (this.upTotal <= 0 || this.upSent <= 0) {
+      return ar
+        ? `${head} إلى واتساب… بدء الاتصال (${secs}ث)`
+        : `${head} to WhatsApp… connecting (${secs}s)`;
+    }
+    const pct = (this.upSent / this.upTotal) * 100;
+    const stalled = Math.round((now - this.lastAdvanceAt) / 1000);
+    if (stalled >= 45) {
+      return ar
+        ? `${head} ${bar(pct)} ⚠️ لا يتقدم منذ ${stalled}ث (قد يكون الاتصال بطيئًا)`
+        : `${head} ${bar(pct)} ⚠️ no progress for ${stalled}s (connection may be slow)`;
+    }
+    const mbps = this.speed / MB;
+    const left = this.speed > 1024 ? Math.max(0, (this.upTotal - this.upSent) / this.speed) : null;
+    const speedTxt = this.speed > 1024 ? `${mbps.toFixed(mbps >= 10 ? 0 : 1)} MB/s` : "…";
+    const eta =
+      left === null
+        ? ""
+        : ar
+          ? ` — متبقي ~${fmtDur(left, true)}`
+          : ` — ~${fmtDur(left, false)} left`;
+    return `${head} ${bar(pct)} ${speedTxt}${eta}`;
+  }
+
   /** Coalesces updates: at most one edit per gap, always ending on the latest state. */
   private refresh(urgent = false) {
     if (!this.visible) return;
+    const gap = this.phase === "upload" ? Math.max(this.gap, 6000) : this.gap;
     const since = this.now() - this.lastEditAt;
-    if (urgent || since >= this.gap) {
+    if (urgent || since >= gap) {
       if (this.pending) clearTimeout(this.pending);
       this.pending = null;
       this.enqueue(this.render());
@@ -199,7 +260,7 @@ export class WhatsAppProgress implements ProgressSink {
     this.pending = setTimeout(() => {
       this.pending = null;
       this.enqueue(this.render());
-    }, this.gap - since);
+    }, gap - since);
     this.pending.unref?.();
   }
 

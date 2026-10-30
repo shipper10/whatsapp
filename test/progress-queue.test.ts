@@ -114,3 +114,39 @@ describe("WhatsAppProgress", () => {
     expect(f.sent.at(-1)).toContain("✅");
   });
 });
+
+describe("upload progress display", () => {
+  it("shows percent, speed and time left, and warns when the upload stalls", async () => {
+    const f = fakeProvider();
+    let t = 1_000_000;
+    const p = new WhatsAppProgress({
+      provider: f.provider,
+      conversationId: "c",
+      lang: "en",
+      minBytes: 0,
+      minEditGapMs: 0,
+      now: () => t,
+    });
+    await p.begin(1);
+    p.file("big.pdf", 100e6);
+    const up = p.uploading();
+    t += 10_000;
+    await up;
+    for (const sent of [10e6, 20e6, 30e6]) {
+      t += 10_000;
+      p.uploadProgress(sent, 100e6);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    const all = [...f.sent, ...f.edits];
+    const last = all.filter((x) => x.includes("Sending")).at(-1) ?? "";
+    expect(last).toContain("30%");
+    expect(last).toMatch(/MB\/s/);
+    expect(last).toMatch(/left/);
+    t += 60_000;
+    p.uploadProgress(30e6, 100e6);
+    await new Promise((r) => setTimeout(r, 10));
+    expect([...f.sent, ...f.edits].at(-1)).toContain("no progress");
+    p.fileDone(true);
+    await p.end();
+  });
+});
