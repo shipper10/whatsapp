@@ -20,6 +20,8 @@ export interface RawTelegramMessage {
   text: string;
   entities: RawEntity[];
   media?: RawMedia;
+  /** Telegram album id: messages sent together as an album share it (only one carries the caption). */
+  groupedId?: string;
 }
 
 export interface TelegramRecord {
@@ -42,6 +44,7 @@ export interface TelegramRecord {
   permalink: string | null;
   /** Heuristic: text-only message with two or more internal links = index/navigation entry. */
   isIndex: boolean;
+  groupedId: string | null;
 }
 
 /**

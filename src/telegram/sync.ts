@@ -92,6 +92,25 @@ export async function syncTelegram(
         }
       }
     }
+    // One-time pass: messages stored before albums were tracked have no album id. Re-read them once
+    // (100 ids per request) so albums can be recognised for the whole existing channel.
+    const albumKey = `${opts.sourceKey}:albums-v1`;
+    if (source.fetchByIds && store.mediaMessageIds && (await store.getCursor(albumKey)) === null) {
+      const ids = await store.mediaMessageIds();
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = await withRetry(
+          () => source.fetchByIds?.(ids.slice(i, i + 100)) ?? Promise.resolve([]),
+          retries,
+          sleep,
+        );
+        if (chunk.length > 0) {
+          await store.upsertMany(chunk.map((m) => parseMessage(m, opts.ctx)));
+          stats.updated += chunk.length;
+        }
+        opts.onProgress?.({ ...stats });
+      }
+      await store.setCursor(albumKey, 1);
+    }
     stats.cursor = cursor || null;
     await store.finishRun(runId, "ok", stats);
     return stats;

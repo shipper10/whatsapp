@@ -22,6 +22,8 @@ export interface TgRow {
   permalink: string | null;
   isIndex: boolean;
   returnIndexId: number | null;
+  /** Album id shared by the messages of one Telegram album. */
+  groupedId?: string | null;
 }
 
 export interface DriveRow {

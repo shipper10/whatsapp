@@ -1,6 +1,7 @@
 import type { LibraryPort } from "../bot/types.js";
 import type { Db } from "../db/client.js";
 import {
+  albumMessageIds,
   childNodes,
   indexMessage,
   indexTitles,
@@ -31,4 +32,5 @@ export class DbLibrary implements LibraryPort {
     matchIndexes(await indexTitles(this.db), query, aliases, limit);
   messageKinds = (ids: number[]) => messageKinds(this.db, ids);
   messageDetail = (messageId: number) => telegramMessageDetail(this.db, messageId);
+  albumMessageIds = (messageId: number) => albumMessageIds(this.db, messageId);
 }

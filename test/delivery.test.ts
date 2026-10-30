@@ -99,6 +99,7 @@ async function setup(
   fetchers: FileFetcher[],
   settings: Record<string, unknown> = {},
   concurrency = 2,
+  libraryExtras: Partial<LibraryPort> = {},
 ) {
   const provider = new FakeProvider();
   const store = new MemSettings();
@@ -106,7 +107,7 @@ async function setup(
   const records: { outcome: string; error?: string }[] = [];
   const tempDir = await mkdtemp(join(tmpdir(), "deliv-"));
   const deliverer = new FileDeliverer({
-    library: lib(d),
+    library: { ...lib(d), ...libraryExtras },
     provider,
     settings: new SettingsService(store, {}, 0),
     fetchers,
@@ -165,6 +166,24 @@ describe("FileDeliverer", () => {
     expect(f.calls).toBeGreaterThanOrEqual(2);
     expect(provider.docs).toHaveLength(0);
     expect(provider.last()).toContain("https://t.me/BahriMed/59");
+  });
+
+  it("sends every file of a Telegram album, in order, with the caption on the first", async () => {
+    const mk = (id: number, caption: string | null): ResourceDetail => ({
+      ...detail([{ ...tg, telegramMessageId: id }]),
+      id: 0,
+      caption,
+      displayName: `f${id}`,
+    });
+    const f = new FakeFetcher("telegram");
+    const { provider, deliverer } = await setup(null, [f], { "links.telegram": false }, 2, {
+      messageDetail: async (id: number) => mk(id, id === 11 ? "Exam model 1 With Answers" : null),
+      albumMessageIds: async () => [10, 11, 12],
+    });
+    await deliverer.deliverMessage(11, target);
+    expect(provider.docs).toHaveLength(3);
+    expect(provider.docs[0]?.caption).toContain("Exam model 1");
+    expect(provider.docs[1]?.caption ?? "").not.toContain("Exam model 1");
   });
 
   it("never fetches Drive content unless explicitly enabled", async () => {

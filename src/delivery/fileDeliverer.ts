@@ -48,12 +48,60 @@ export class FileDeliverer implements Deliverer {
   }
 
   async deliver(resourceId: number, target: DeliveryTarget): Promise<void> {
-    await this.run(await this.d.library.detail(resourceId), target, resourceId);
+    const detail = await this.d.library.detail(resourceId);
+    await this.runAlbum(detail, target, resourceId);
   }
 
   async deliverMessage(messageId: number, target: DeliveryTarget): Promise<void> {
     const detail = await this.d.library.messageDetail(messageId);
-    await this.run(detail, target, detail && detail.id > 0 ? detail.id : null);
+    await this.runAlbum(detail, target, detail && detail.id > 0 ? detail.id : null);
+  }
+
+  /**
+   * Telegram albums are several messages with one caption on one of them. Whichever member was asked for,
+   * the whole album is sent in order, the caption riding on the first file.
+   */
+  private async runAlbum(
+    detail: ResourceDetail | null,
+    target: DeliveryTarget,
+    logId: number | null,
+  ): Promise<void> {
+    const mid = detail?.sources.find((s) => s.type === "telegram")?.telegramMessageId ?? null;
+    const ids =
+      detail && mid && this.d.library.albumMessageIds
+        ? await this.d.library.albumMessageIds(mid)
+        : [];
+    if (!detail || ids.length < 2) return this.run(detail, target, logId);
+
+    const members: ResourceDetail[] = [];
+    for (const id of ids) {
+      const d = id === mid ? detail : await this.d.library.messageDetail(id);
+      if (d) members.push(d);
+    }
+    if (members.length < 2) return this.run(detail, target, logId);
+    const caption = members.find((m) => m.caption?.trim())?.caption ?? null;
+    const first = members[0] as ResourceDetail;
+    members[0] = {
+      ...first,
+      caption,
+      displayName:
+        first.id > 0 || !caption
+          ? first.displayName
+          : (
+              cleanCaption(caption)
+                .split("\n")
+                .find((l) => l.trim()) ?? first.displayName
+            ).slice(0, 120),
+    };
+    target.progress?.expand?.(members.length - 1);
+    // The caption travels once, on the first file; the others are labelled by their file names.
+    for (const [i, m] of members.entries()) {
+      await this.run(
+        i === 0 ? m : { ...m, caption: null, displayName: m.displayName },
+        target,
+        logId,
+      );
+    }
   }
 
   private async run(

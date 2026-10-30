@@ -75,3 +75,6 @@ Render's free tier gives 750 instance-hours per month: enough for one always-on 
 - Opus files that carry an embedded cover picture inside their tags (a typical cause of "audio is not available") are sent as a copy with the picture removed; the sound itself is untouched.
 - Download check: every downloaded file's size must equal the size the source reports (Telegram/Drive). A mismatch triggers one re-download; if the copies still differ, the bot sends links instead of a possibly damaged file.
 - `/set delivery.audioPartMb 8` makes split parts smaller (2 to 15 MB) if a long part stops playing midway.
+
+## 8. Telegram albums
+Files sent together as a Telegram album (the caption is on only one of them) are treated as ONE item: classified and searched with the album's caption, and sent together, in order, with the caption on the first file. This applies to new posts automatically; on the first sync after an update the bot re-reads the stored files once (100 per request) to learn which of them belong to albums, so old albums are fixed too.

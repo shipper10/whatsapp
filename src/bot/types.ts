@@ -28,6 +28,8 @@ export interface LibraryPort {
   messageKinds(ids: number[]): Promise<Map<number, MessageKind>>;
   /** Delivery details for any Telegram message id (files that never became resources included). */
   messageDetail(messageId: number): Promise<ResourceDetail | null>;
+  /** Other files sent in the same Telegram album, in order (including this one); empty when not an album. */
+  albumMessageIds?(messageId: number): Promise<number[]>;
 }
 
 export type Item =

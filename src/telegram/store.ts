@@ -12,6 +12,8 @@ export interface TelegramStore {
   finishRun(runId: number, status: "ok" | "error", stats: object, error?: string): Promise<void>;
   /** Ids of every stored index message: these are re-read on each sync so edits to old indexes show up. */
   indexMessageIds?(): Promise<number[]>;
+  /** Ids of all stored files/photos, for the one-time pass that learns which of them belong to albums. */
+  mediaMessageIds?(): Promise<number[]>;
 }
 
 export class DbTelegramStore implements TelegramStore {
@@ -32,6 +34,7 @@ export class DbTelegramStore implements TelegramStore {
           internalLinkIds: r.internalLinkIds,
           returnIndexId: r.returnIndexId,
           isIndex: r.isIndex,
+          groupedId: r.groupedId,
         },
         hashtags: r.hashtags,
         mediaType: r.mediaType,
@@ -65,6 +68,19 @@ export class DbTelegramStore implements TelegramStore {
         and(
           eq(telegramMessages.syncStatus, "active"),
           sql`(${telegramMessages.entitiesJson}->>'isIndex')::boolean = true`,
+        ),
+      );
+    return rows.map((r) => r.id);
+  }
+
+  async mediaMessageIds() {
+    const rows = await this.db
+      .select({ id: telegramMessages.messageId })
+      .from(telegramMessages)
+      .where(
+        and(
+          eq(telegramMessages.syncStatus, "active"),
+          sql`${telegramMessages.mediaType} is not null`,
         ),
       );
     return rows.map((r) => r.id);

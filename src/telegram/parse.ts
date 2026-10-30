@@ -62,6 +62,7 @@ export function parseMessage(raw: RawTelegramMessage, ctx: ParseContext): Telegr
     mimeType: media?.mimeType ?? null,
     fileSizeBytes: media?.sizeBytes ?? null,
     permalink: ctx.username ? `https://t.me/${ctx.username}/${raw.id}` : null,
+    groupedId: raw.groupedId ?? null,
     isIndex: !media && uniqueInternal.length >= 2,
   };
 }

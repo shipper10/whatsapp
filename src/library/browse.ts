@@ -257,6 +257,32 @@ export async function messageKinds(db: Db, ids: number[]): Promise<Map<number, M
 }
 
 /** Delivery details for any synced Telegram message, whether or not the classifier made a resource of it. */
+/** Message ids of the Telegram album this message belongs to, in send order (empty when it is not in one). */
+export async function albumMessageIds(db: Db, messageId: number): Promise<number[]> {
+  const gid = sql<string | null>`${telegramMessages.entitiesJson}->>'groupedId'`;
+  const [m] = await db
+    .select({ chatId: telegramMessages.chatId, gid })
+    .from(telegramMessages)
+    .where(
+      and(eq(telegramMessages.messageId, messageId), eq(telegramMessages.syncStatus, "active")),
+    )
+    .limit(1);
+  if (!m?.gid) return [];
+  const rows = await db
+    .select({ id: telegramMessages.messageId })
+    .from(telegramMessages)
+    .where(
+      and(
+        eq(telegramMessages.chatId, m.chatId),
+        eq(telegramMessages.syncStatus, "active"),
+        sql`${telegramMessages.entitiesJson}->>'groupedId' = ${m.gid}`,
+        sql`${telegramMessages.mediaType} is not null`,
+      ),
+    )
+    .orderBy(asc(telegramMessages.messageId));
+  return rows.map((r) => r.id);
+}
+
 export async function telegramMessageDetail(
   db: Db,
   messageId: number,

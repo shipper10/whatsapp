@@ -80,6 +80,7 @@ export class GramJsSource implements TelegramSource {
       text: m.message ?? "",
       entities: toEntities(m),
       media: toMedia(m),
+      groupedId: m.groupedId ? String(m.groupedId) : undefined,
     };
   }
 

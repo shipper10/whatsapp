@@ -13,6 +13,7 @@ import {
   telegramMessages,
 } from "../db/schema.js";
 import type { RawEntity } from "../telegram/types.js";
+import { mergeAlbums } from "./albums.js";
 import { type DriveRow, type LibraryPlan, planLibrary, type TgRow } from "./classify.js";
 
 export interface ApplyStats {
@@ -34,6 +35,7 @@ async function loadInputs(db: Db) {
       entities?: RawEntity[];
       returnIndexId?: number | null;
       isIndex?: boolean;
+      groupedId?: string | null;
     };
     return {
       dbId: r.id,
@@ -49,6 +51,7 @@ async function loadInputs(db: Db) {
       permalink: r.permalink,
       isIndex: meta.isIndex ?? false,
       returnIndexId: meta.returnIndexId ?? null,
+      groupedId: meta.groupedId ?? null,
     };
   });
 
@@ -67,7 +70,7 @@ async function loadInputs(db: Db) {
     folderPath: f.folderPath,
     webViewLink: f.webViewLink,
   }));
-  return { telegram, drive };
+  return { telegram: mergeAlbums(telegram), drive };
 }
 
 /** Writes a plan to the database. Idempotent; never deletes; respects admin-locked resources. */

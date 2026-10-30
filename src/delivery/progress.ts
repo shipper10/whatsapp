@@ -4,6 +4,8 @@ import type { WhatsAppProvider } from "../providers/whatsapp/types.js";
 export interface ProgressSink {
   /** Called once with the number of files in the request. */
   begin(total: number): Promise<void>;
+  /** The request turned out to contain `extra` more files than announced (an album). */
+  expand?(extra: number): void;
   file(name: string, sizeBytes: number | null): void;
   queued(position: number): void;
   downloading(done: number, total: number | null): void;
@@ -78,6 +80,11 @@ export class WhatsAppProgress implements ProgressSink {
       this.refresh(true);
       await this.chain;
     }
+  }
+
+  expand(extra: number) {
+    this.total += extra;
+    if (this.total > 1) this.visible = true;
   }
 
   file(name: string, sizeBytes: number | null) {
