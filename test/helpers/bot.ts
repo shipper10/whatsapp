@@ -1,4 +1,5 @@
 import { createHandler } from "../../src/bot/handler.js";
+import { DbPrefs } from "../../src/bot/prefs.js";
 import { ReplyTracker } from "../../src/bot/replyTracker.js";
 import { DbSessionStore } from "../../src/core/session/store.js";
 import type { Db } from "../../src/db/client.js";
@@ -102,6 +103,7 @@ export async function makeBot(opts: { env?: NodeJS.ProcessEnv; now?: () => numbe
       library,
       deliverer: new LinksOnlyDeliverer(library, tracked, settings),
       logger,
+      prefs: new DbPrefs(db),
       now: nowMs,
     });
   return { db, provider, settings, store, sessions, logs, handler: make(), makeHandler: make };

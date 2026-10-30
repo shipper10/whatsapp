@@ -1,5 +1,6 @@
 import { normalizeText } from "../core/normalize/arabic.js";
 import { chunkText, marker, renderIndex } from "../library/indexView.js";
+import { expandQuery, parsePairs } from "../library/translations.js";
 import { clip, t } from "./messages.js";
 import { parseSelection, resolveTyped, type Selection } from "./selection.js";
 import type { BotConfig, Item, LibraryPort, SessionState, Turn, View } from "./types.js";
@@ -15,11 +16,17 @@ export const emptyState = (): SessionState => ({
 });
 
 type Command =
-  | { kind: "home" | "back" | "next" | "prev" }
+  | { kind: "home" | "back" | "next" | "prev" | "recent" }
   | { kind: "select"; sel: Selection }
   | { kind: "text"; text: string };
 
-const WORDS: Record<string, "home" | "back" | "next" | "prev"> = {
+const WORDS: Record<string, "home" | "back" | "next" | "prev" | "recent"> = {
+  جديد: "recent",
+  الجديد: "recent",
+  احدث: "recent",
+  new: "recent",
+  latest: "recent",
+  recent: "recent",
   home: "home",
   menu: "home",
   start: "home",
@@ -194,7 +201,7 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
   if (view.type === "search") {
     const offset = (view.page - 1) * size;
     const cap = Math.max(0, cfg.maxResults - offset);
-    const res = await lib.search(view.query, Math.min(size, cap) + 1, offset);
+    const res = await searchWithTranslations(lib, cfg, view.query, Math.min(size, cap) + 1, offset);
     const shown = res.slice(0, Math.min(size, cap));
     const hasNext = res.length > shown.length && offset + shown.length < cfg.maxResults;
     const items = shown.map((r): Item => ({ kind: "resource", id: r.id, label: r.displayName }));
@@ -235,6 +242,34 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
   };
 }
 
+/**
+ * File search that also tries the dictionary's other-language spellings of the query ("كيمياء حيوية" ->
+ * "biochemistry"), merging the results without repeats. The plain query always comes first.
+ */
+async function searchWithTranslations(
+  lib: LibraryPort,
+  cfg: BotConfig,
+  query: string,
+  limit: number,
+  offset: number,
+) {
+  const variants = expandQuery(query, parsePairs(cfg.aliases), 3);
+  if (variants.length <= 1) return lib.search(query, limit, offset);
+  const need = offset + limit;
+  const seen = new Set<number>();
+  const merged: Awaited<ReturnType<LibraryPort["search"]>> = [];
+  for (const v of [query, ...variants.filter((x) => x !== normalizeText(query))]) {
+    for (const r of await lib.search(v, need, 0)) {
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        merged.push(r);
+      }
+    }
+    if (merged.length >= need) break;
+  }
+  return merged.slice(offset, offset + limit);
+}
+
 const pagedView = (v: View, page: number): View =>
   v.type === "home" || v.type === "index" || v.type === "indexes" ? v : { ...v, page };
 
@@ -265,6 +300,8 @@ export async function step(
   switch (cmd.kind) {
     case "home":
       return show({ type: "home" }, []);
+    case "recent":
+      return show({ type: "recent", page: 1 }, view.type === "recent" ? stack : [...stack, view]);
     case "back": {
       const back = stack[stack.length - 1];
       return back ? show(back, stack.slice(0, -1)) : show({ type: "home" }, []);

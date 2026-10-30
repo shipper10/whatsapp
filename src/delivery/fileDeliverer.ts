@@ -124,7 +124,7 @@ export class FileDeliverer implements Deliverer {
     target: DeliveryTarget,
     logId: number | null,
   ): Promise<void> {
-    const lang = await this.d.settings.get("bot.language");
+    const lang = target.lang ?? (await this.d.settings.get("bot.language"));
     const flags: LinkFlags = {
       telegram: await this.d.settings.get("links.telegram"),
       drive: await this.d.settings.get("links.drive"),
@@ -207,7 +207,7 @@ export class FileDeliverer implements Deliverer {
         this.d.settings.get("delivery.audioMode"),
         this.d.settings.get("delivery.largeAudioMode"),
         this.d.settings.get("delivery.opusAsMp3"),
-        this.d.settings.get("bot.language"),
+        target.lang ? Promise.resolve(target.lang) : this.d.settings.get("bot.language"),
         this.d.settings.get("delivery.audioPartMb"),
       ]);
     const maxBytes = maxMb * 1024 * 1024;
@@ -312,7 +312,7 @@ export class FileDeliverer implements Deliverer {
     if (!target.progress && (typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
-        text: waitNotice(await this.d.settings.get("bot.language")),
+        text: waitNotice(lang),
         quoteMessageId: target.quoteMessageId,
       });
     }

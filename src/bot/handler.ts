@@ -7,9 +7,11 @@ import type { Deliverer } from "../delivery/types.js";
 import type { IncomingMessage, WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
 import { parseInput, step } from "./engine.js";
-import { t } from "./messages.js";
+import { setTextOverrides, t } from "./messages.js";
+import type { PrefsPort } from "./prefs.js";
 import type { ReplyTracker } from "./replyTracker.js";
 import type { BotConfig, LibraryPort } from "./types.js";
+import { userCommand } from "./userCommands.js";
 
 export interface HandlerDeps {
   provider: WhatsAppProvider;
@@ -26,6 +28,8 @@ export interface HandlerDeps {
   adminHook?: (msg: IncomingMessage) => Promise<boolean>;
   /** Knows who each bot message in a group answered; `provider` must be the one wrapped by it. */
   replies: ReplyTracker;
+  /** Per-person language and new-file subscriptions. */
+  prefs?: PrefsPort;
   now?: () => number;
 }
 
@@ -75,7 +79,7 @@ export function createHandler(deps: HandlerDeps) {
 
   async function process(msg: IncomingMessage) {
     const [
-      lang,
+      defaultLang,
       pageSize,
       maxResults,
       welcome,
@@ -90,6 +94,9 @@ export function createHandler(deps: HandlerDeps) {
       aliases,
       showTelegram,
       showDrive,
+      userLanguage,
+      notifyEnabled,
+      overrides,
     ] = await Promise.all([
       deps.settings.get("bot.language"),
       deps.settings.get("search.pageSize"),
@@ -106,7 +113,13 @@ export function createHandler(deps: HandlerDeps) {
       deps.settings.get("library.indexAliases"),
       deps.settings.get("links.telegram"),
       deps.settings.get("links.drive"),
+      deps.settings.get("bot.userLanguage"),
+      deps.settings.get("notify.enabled"),
+      deps.settings.get("text.overrides"),
     ]);
+    setTextOverrides(overrides);
+    const chosen = deps.prefs && userLanguage ? await deps.prefs.getLang(msg.participantId) : null;
+    const lang = chosen ?? defaultLang;
     const cfg: BotConfig = {
       pageSize,
       maxResults,
@@ -165,6 +178,19 @@ export function createHandler(deps: HandlerDeps) {
 
       if (deps.adminHook && (await deps.adminHook({ ...msg, text }))) return;
 
+      const personal = await userCommand(text, {
+        prefs: deps.prefs,
+        userLanguage,
+        notifyEnabled,
+        lang,
+        participantId: msg.participantId,
+        conversationId: msg.conversationId,
+      });
+      if (personal !== null) {
+        await reply(msg, personal);
+        return;
+      }
+
       const turn = await step(deps.library, cfg, existing, text);
       await deps.sessions.save(key, turn.state, ttl);
       for (const r of turn.replies) await reply(msg, r);
@@ -172,6 +198,7 @@ export function createHandler(deps: HandlerDeps) {
         const target = {
           conversationId: msg.conversationId,
           quoteMessageId: msg.isGroup ? msg.messageId : undefined,
+          lang: chosen ?? undefined,
         };
         const total = turn.deliver.resources.length + turn.deliver.messages.length;
         const [showProgress, minMb] = await Promise.all([

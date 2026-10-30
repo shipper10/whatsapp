@@ -13,6 +13,8 @@ export interface JobDeps {
   };
   /** Free-text progress of a running job (e.g. "1200 messages read"), shown by /status. */
   note?: (kind: JobKind) => string | undefined;
+  /** Called after every finished run (alerts, new-file notices). Errors in it never affect the sync. */
+  onReport?: (r: JobReport) => Promise<void>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
@@ -74,6 +76,11 @@ export class SyncScheduler {
     this.startedAt.delete(kind);
     this.phase.delete(kind);
     this.last.set(kind, report);
+    try {
+      await this.d.onReport?.(report);
+    } catch (err) {
+      this.d.logger.warn({ kind, error: String(err) }, "post-sync hook failed");
+    }
     return report;
   }
 

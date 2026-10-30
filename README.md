@@ -33,6 +33,8 @@
 | [`docs/DEPLOY_FULL.md`](docs/DEPLOY_FULL.md) | المشرف | تشغيل الوضع الكامل بـ Docker + OpenWA، والنسخ الاحتياطي |
 | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | الطلاب | طريقة استخدام البوت في الخاص والمجموعات |
 | [`docs/ADMIN_GUIDE.md`](docs/ADMIN_GUIDE.md) | المشرف | كل أوامر الإشراف وأهم الإعدادات |
+| [`docs/PANEL.md`](docs/PANEL.md) | المشرف | لوحة الويب: الصحة، قاموس الترجمة، نصوص البوت |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | المشرف | نسخ احتياطي مشفّر أسبوعي للوضع الخفيف واستعادته |
 | [`docs/SETTINGS.md`](docs/SETTINGS.md) | المشرف | مرجع كل الإعدادات (يُولَّد تلقائيًا) |
 | [`docs/TELEGRAM_SETUP.md`](docs/TELEGRAM_SETUP.md) | المشرف | الحصول على مفاتيح تيليجرام وجلسة الدخول |
 | [`docs/DRIVE_SETUP.md`](docs/DRIVE_SETUP.md) | المشرف | ربط Google Drive (اختياري) |

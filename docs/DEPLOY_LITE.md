@@ -35,7 +35,7 @@
 | `WHATSAPP_PROVIDER` | `baileys` |
 | `DATABASE_URL` | رابط Neon/Supabase |
 | `DB_POOL_MAX` | `3` |
-| `ADMIN_HTTP_TOKEN` | نص عشوائي طويل (16 حرفًا فأكثر)؛ يحمي صفحة الربط |
+| `ADMIN_HTTP_TOKEN` | نص عشوائي طويل (16 حرفًا فأكثر)؛ يحمي صفحة الربط **ولوحة الويب** (`/admin/panel`) |
 | `ADMIN_IDS` | رقمك بعد الربط، مثل `2499xxxxxxxx@s.whatsapp.net` |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | من my.telegram.org |
 | `TELEGRAM_CHANNEL` | اسم القناة، مثل `BahriMed` |

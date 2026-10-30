@@ -27,11 +27,13 @@ export interface ServerDeps {
   };
   /** Lite mode only. */
   link?: LinkAdmin;
+  /** The admin web panel (any mode); handles everything under /admin/panel. */
+  panel?: (req: HttpReq, res: ServerResponse, url: URL) => Promise<boolean>;
   health: () => Promise<boolean>;
   logger: { warn: (o: object, m?: string) => void; error: (o: object, m?: string) => void };
 }
 
-function readBody(req: HttpReq): Promise<string | null> {
+export function readBody(req: HttpReq): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -91,6 +93,7 @@ export function createAppServer(deps: ServerDeps): Server {
           .writeHead(200, { "content-type": "text/plain; charset=utf-8" })
           .end("Library bot is running.\n");
       }
+      if (deps.panel && (await deps.panel(req, res, url))) return;
       if (deps.link && req.method === "GET" && url.pathname.startsWith("/admin/link")) {
         const bearer = req.headers.authorization?.replace(/^Bearer /i, "");
         const token = url.searchParams.get("token") ?? bearer;

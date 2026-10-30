@@ -30,7 +30,11 @@ src/bot/                 engine (آلة الحالة)، selection (تحليل 1-
 src/delivery/            fileDeliverer (الطابور، التنزيل، الإرسال، الألبومات)، fetchers (تيليجرام/درايف)،
                          audioSplit (تقسيم الصوت وتنظيف الرؤوس)، كاش الرفع وsingle-flight داخل fileDeliverer، progress (رسالة الحالة)، links، typeFilter
 src/providers/whatsapp/  types (الواجهة المشتركة)، baileys/ (الوضع الخفيف)، openwa.ts (الوضع الكامل)
-src/admin/               أوامر المشرف
+src/admin/               أوامر المشرف، targets (من يُراسَل عند التنبيه)
+src/notify/              digest (إشعار الملفات الجديدة للمشتركين)
+src/bot/                 engine، handler، messages (نصوص قابلة للتعديل)، userCommands (مساعدة/لغة/اشتراك)، prefs
+src/library/translations  قاموس الترجمة (توسيع البحث، الكلمات بلا ترجمة)
+src/http/panel*.ts       لوحة الويب (cookie + نماذج) وبياناتها
 src/jobs/                scheduler (دورات المزامنة)، keepalive
 src/http/server.ts       /، /healthz، /admin/link، /webhooks/openwa
 src/core/                normalize (عربي/إنجليزي)، session، jobQueue (طابور موزون بميزانية بايتات)، resources (القرص/الذاكرة)، retry

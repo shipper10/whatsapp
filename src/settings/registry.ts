@@ -95,6 +95,53 @@ export const settingsRegistry = {
     restart: true,
     description: "Parallel file deliveries.",
   }),
+  "text.overrides": def({
+    schema: z.record(z.string(), z.string()),
+    default: {},
+    restart: false,
+    description:
+      'Your own wording for the bot\'s built-in messages, as {"key.lang": "text"}. Edit from the admin panel (Texts page); an empty or missing entry means the built-in text.',
+  }),
+  "bot.userLanguage": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "BOT_USER_LANGUAGE",
+    restart: false,
+    description:
+      "Let each person pick their language (send 'english' or 'عربي'); false = everyone gets bot.language.",
+  }),
+  "notify.enabled": def({
+    schema: z.boolean(),
+    default: true,
+    envName: "NOTIFY_ENABLED",
+    restart: false,
+    description:
+      "Message subscribers (people who sent 'اشتراك') when new files arrive. Only people who asked for it are messaged.",
+  }),
+  "notify.minIntervalHours": def({
+    schema: z.coerce.number().min(0).max(168),
+    default: 6,
+    envName: "NOTIFY_MIN_INTERVAL_HOURS",
+    restart: false,
+    description:
+      "At most one new-files message per subscriber in this many hours; files arriving in between are bundled into the next one.",
+  }),
+  "notify.maxRecipients": def({
+    schema: z.coerce.number().int().min(0).max(1000),
+    default: 100,
+    envName: "NOTIFY_MAX_RECIPIENTS",
+    restart: false,
+    description:
+      "Most chats messaged per new-files round (keeps bursts small, lowers the risk of restriction).",
+  }),
+  "alerts.syncFailures": def({
+    schema: z.coerce.number().int().min(0).max(100),
+    default: 3,
+    envName: "ALERT_SYNC_FAILURES",
+    restart: false,
+    description:
+      "Message the admins on WhatsApp after this many failed syncs in a row (and again when it recovers). 0 = off.",
+  }),
   "delivery.maxInflightMb": def({
     schema: z.coerce.number().int().min(0).max(20000),
     default: 800,

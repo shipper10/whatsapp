@@ -67,9 +67,60 @@ const M = {
     ar: "حدث خطأ مؤقت. حاول مرة أخرى بعد قليل.",
     en: "A temporary error occurred. Please try again shortly.",
   },
+  help: {
+    ar: "📖 *كيف أستعمل البوت؟*\n\n• اكتب *0* للقائمة الرئيسية، و*-* للرجوع.\n• اكتب اسم مادة (مثل: كيمياء) للانتقال لفهرسها.\n• لإرسال ملف اكتب رقمه 【】، ولعدة ملفات: 1-5 أو 3,7,9.\n• بالنوع: شيت 1-5 أو كل المحاضرات.\n• للبحث في الملفات: ؟ كلمة\n• *جديد* لأحدث الإضافات.\n• *اشتراك* لتصلك رسالة عند وصول ملفات جديدة، و*الغاء الاشتراك* لإيقافها.\n• *english* للتحويل للإنجليزية، و*عربي* للعربية.",
+    en: "📖 *How to use the bot*\n\n• Send *0* for the main menu and *-* to go back.\n• Type a subject name (e.g. chemistry) to jump to its index.\n• To get a file send its 【】 number; several: 1-5 or 3,7,9.\n• By type: sheet 1-5 or all lectures.\n• To search files: ? word\n• *new* for the latest additions.\n• *subscribe* to be told when new files arrive, *unsubscribe* to stop.\n• *عربي* for Arabic, *english* for English.",
+  },
+  langSet: {
+    ar: "✅ تم تغيير اللغة إلى العربية.",
+    en: "✅ Language changed to English.",
+  },
+  subscribed: {
+    ar: "🔔 تم الاشتراك. سأخبرك عند وصول ملفات جديدة. للإيقاف اكتب: الغاء الاشتراك",
+    en: "🔔 Subscribed. I'll tell you when new files arrive. To stop send: unsubscribe",
+  },
+  alreadySubscribed: {
+    ar: "أنت مشترك بالفعل. للإيقاف اكتب: الغاء الاشتراك",
+    en: "You're already subscribed. To stop send: unsubscribe",
+  },
+  unsubscribed: {
+    ar: "🔕 تم إيقاف الإشعارات. للعودة اكتب: اشتراك",
+    en: "🔕 Notifications stopped. To resume send: subscribe",
+  },
+  notSubscribed: {
+    ar: "لست مشتركًا. للاشتراك اكتب: اشتراك",
+    en: "You're not subscribed. To subscribe send: subscribe",
+  },
+  notifyOff: {
+    ar: "الإشعارات متوقفة حاليًا.",
+    en: "Notifications are currently off.",
+  },
+  newFiles: {
+    ar: "🆕 وصلت {n} ملفات جديدة:\n{list}\n\nاكتب *جديد* لعرضها. لإيقاف الإشعارات: الغاء الاشتراك",
+    en: "🆕 {n} new files arrived:\n{list}\n\nSend *new* to see them. To stop notifications: unsubscribe",
+  },
 } as const;
 
 export type MsgKey = keyof typeof M;
-export const t = (key: MsgKey, lang: Lang) => M[key][lang];
+export type MessageLang = Lang;
+
+/** Admin edits of the texts above, keyed "key.lang" (setting `text.overrides`). */
+let overrides: Record<string, string> = {};
+export function setTextOverrides(o: Record<string, string>) {
+  overrides = o;
+}
+
+export const t = (key: MsgKey, lang: Lang) => {
+  const custom = overrides[`${key}.${lang}`];
+  return custom?.trim() ? custom : M[key][lang];
+};
+
+/** Every editable text with its built-in wording, for the admin panel. */
+export const messageCatalog = () =>
+  (Object.keys(M) as MsgKey[]).map((key) => ({
+    key,
+    ar: M[key].ar as string,
+    en: M[key].en as string,
+  }));
 
 export const clip = (s: string, n = 80) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);

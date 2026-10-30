@@ -2,7 +2,9 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAdminHook } from "./admin/commands.js";
+import { adminChats } from "./admin/targets.js";
 import { createHandler } from "./bot/handler.js";
+import { DbPrefs } from "./bot/prefs.js";
 import { ReplyTracker } from "./bot/replyTracker.js";
 import { loadEnv } from "./config/env.js";
 import { freeDiskMb, rssMb } from "./core/resources.js";
@@ -18,12 +20,17 @@ import { materializeGoogleCredentials } from "./drive/credentials.js";
 import { DbDriveStore } from "./drive/store.js";
 import { syncDrive } from "./drive/sync.js";
 import type { DriveClient } from "./drive/types.js";
+import { createPanel } from "./http/panel.js";
+import { loadCounts } from "./http/panelData.js";
 import { createAppServer } from "./http/server.js";
+import { SyncAlerts } from "./jobs/alerts.js";
 import { startKeepAlive } from "./jobs/keepalive.js";
 import { SyncScheduler } from "./jobs/scheduler.js";
 import { classifyAndApply } from "./library/apply.js";
+import { indexTitles } from "./library/browse.js";
 import { DbLibrary } from "./library/dbLibrary.js";
 import { createLogger } from "./logger.js";
+import { sendNewFilesDigest } from "./notify/digest.js";
 import { BaileysProvider } from "./providers/whatsapp/baileys/provider.js";
 import { OpenWaProvider } from "./providers/whatsapp/openwa.js";
 import type { IncomingMessage, WhatsAppProvider } from "./providers/whatsapp/types.js";
@@ -96,6 +103,7 @@ const provider: WhatsAppProvider = replies.wrap(
     }),
 );
 const library = new DbLibrary(db);
+const prefs = new DbPrefs(db);
 const sessions = new DbSessionStore(db);
 
 const fetchers: FileFetcher[] = [];
@@ -126,6 +134,14 @@ const channelUsername = async () => {
 };
 
 const syncNotes = new Map<string, string>();
+const alerts = new SyncAlerts({
+  threshold: () => settings.get("alerts.syncFailures"),
+  notifyAdmins: async (text) => {
+    const suffix = baileys ? "s.whatsapp.net" : "c.us";
+    for (const conversationId of await adminChats(db, env.ADMIN_IDS, suffix))
+      await provider.sendText({ conversationId, text });
+  },
+});
 const scheduler = new SyncScheduler({
   logger: log,
   intervalMinutes: (kind) =>
@@ -147,6 +163,10 @@ const scheduler = new SyncScheduler({
     drive: async () => syncDrive(new DbDriveStore(db), (s) => driveClientFor(s.credentialRef)),
   },
   note: (kind) => syncNotes.get(kind),
+  onReport: async (report) => {
+    await alerts.onReport(report);
+    if (report.ok) await sendNewFilesDigest({ db, provider, settings, prefs, logger: log });
+  },
   classify: async () => classifyAndApply(db, await channelUsername()),
 });
 
@@ -179,6 +199,7 @@ const handler = createHandler({
   deliverer,
   logger: log,
   adminHook,
+  prefs,
 });
 
 onIncoming = (id, msg) => handler.handle(id, msg);
@@ -199,6 +220,46 @@ const server = createAppServer({
           pairingCode: (phone) => baileys.requestPairingCode(phone),
         }
       : undefined,
+  panel: env.ADMIN_HTTP_TOKEN
+    ? createPanel({
+        token: env.ADMIN_HTTP_TOKEN,
+        settings,
+        logger: log,
+        indexTitles: async () => (await indexTitles(db)).map((t) => t.title),
+        overview: async () => {
+          const st = deliverer.stats();
+          const w = baileys?.status();
+          const base = await loadCounts(db);
+          return {
+            ...base,
+            whatsapp: baileys
+              ? w?.state === "open"
+                ? "✅ متصل"
+                : `⚠️ ${w?.state ?? "?"}`
+              : "OpenWA",
+            syncs: (["telegram", "drive"] as const).map((kind) => {
+              const r = scheduler.last.get(kind);
+              const run = scheduler.activity().find((a) => a.kind === kind);
+              return {
+                kind,
+                ok: r ? r.ok : null,
+                at: r?.finishedAt ?? null,
+                error: r?.error,
+                running: run ? (syncNotes.get(kind) ?? "تعمل الآن") : undefined,
+              };
+            }),
+            load: {
+              running: st.running,
+              queued: st.queued,
+              inflightMb: Math.round(st.inflightBytes / 1048576),
+              cached: st.cached,
+              rssMb: rssMb(),
+              freeDiskMb: await freeDiskMb(env.TEMP_FILE_DIR),
+            },
+          };
+        },
+      })
+    : undefined,
   health: async () => {
     await pool.query("select count(*) from app_settings"); // a real table read, not just a ping
     return true;
