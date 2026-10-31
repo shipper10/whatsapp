@@ -6,8 +6,6 @@ export interface DeliveryTarget {
   conversationId: string;
   /** Provider id of the message to quote (set in groups). */
   quoteMessageId?: string;
-  /** The person's own language, when they chose one. */
-  lang?: "ar" | "en";
 }
 
 export interface Deliverer {

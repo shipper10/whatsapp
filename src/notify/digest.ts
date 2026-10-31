@@ -1,6 +1,5 @@
 import { and, asc, eq, gt, sql } from "drizzle-orm";
-import { setTextOverrides, t } from "../bot/messages.js";
-import type { PrefsPort } from "../bot/prefs.js";
+import { t } from "../bot/messages.js";
 import type { Db } from "../db/client.js";
 import { resources, subscriptions, syncCursors } from "../db/schema.js";
 import { cleanCaption } from "../library/indexView.js";
@@ -11,7 +10,6 @@ export interface DigestDeps {
   db: Db;
   provider: WhatsAppProvider;
   settings: SettingsService;
-  prefs: PrefsPort;
   logger: { info: (o: object, m?: string) => void; warn: (o: object, m?: string) => void };
   now?: () => Date;
 }
@@ -65,21 +63,18 @@ export async function sendNewFilesDigest(d: DigestDeps): Promise<{ sent: number;
 
   const limit = await d.settings.get("notify.maxRecipients");
   const subs = limit > 0 ? await d.db.select().from(subscriptions).limit(limit) : [];
-  setTextOverrides(await d.settings.get("text.overrides"));
-  const defaultLang = await d.settings.get("bot.language");
-  const userLanguage = await d.settings.get("bot.userLanguage");
 
   const names = fresh.slice(0, LIST_MAX).map((f) => `• ${cleanCaption(f.name, 70)}`);
   let sent = 0;
   for (const s of subs) {
-    const lang = (userLanguage ? await d.prefs.getLang(s.conversationId) : null) ?? defaultLang;
     const more =
       fresh.length > LIST_MAX
-        ? `\n${lang === "ar" ? `… و${fresh.length - LIST_MAX} أخرى` : `… and ${fresh.length - LIST_MAX} more`}`
+        ? `
+… and ${fresh.length - LIST_MAX} more`
         : "";
     const res = await d.provider.sendText({
       conversationId: s.conversationId,
-      text: t("newFiles", lang)
+      text: t("newFiles")
         .replace("{n}", String(fresh.length))
         .replace("{list}", names.join("\n") + more),
     });

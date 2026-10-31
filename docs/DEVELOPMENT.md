@@ -32,8 +32,8 @@ src/delivery/            fileDeliverer (الطابور، التنزيل، الإ
 src/providers/whatsapp/  types (الواجهة المشتركة)، baileys/ (الوضع الخفيف)، openwa.ts (الوضع الكامل)
 src/admin/               أوامر المشرف، targets (من يُراسَل عند التنبيه)
 src/notify/              digest (إشعار الملفات الجديدة للمشتركين)
-src/bot/                 engine، handler، messages (نصوص قابلة للتعديل)، userCommands (مساعدة/لغة/اشتراك)، prefs
-src/library/translations  قاموس الترجمة (توسيع البحث، الكلمات بلا ترجمة)
+src/bot/                 engine، handler، messages (كل نصوص البوت، إنجليزية)، userCommands (help/subscribe)، prefs (الاشتراكات)
+src/library/fuzzy.ts     مطابقة متسامحة (حالة الأحرف، أخطاء إملائية، كتابة ناقصة، أرقام ترتيبية، اختصارات) تستعملها indexSearch
 src/http/panel*.ts       لوحة الويب (cookie + نماذج) وبياناتها
 src/jobs/                scheduler (دورات المزامنة)، keepalive
 src/http/server.ts       /، /healthz، /admin/link، /webhooks/openwa

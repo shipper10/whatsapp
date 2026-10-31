@@ -124,7 +124,6 @@ export class FileDeliverer implements Deliverer {
     target: DeliveryTarget,
     logId: number | null,
   ): Promise<void> {
-    const lang = target.lang ?? (await this.d.settings.get("bot.language"));
     const flags: LinkFlags = {
       telegram: await this.d.settings.get("links.telegram"),
       drive: await this.d.settings.get("links.drive"),
@@ -132,7 +131,7 @@ export class FileDeliverer implements Deliverer {
     if (!detail) {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
-        text: t("unavailable", lang),
+        text: t("unavailable"),
         quoteMessageId: target.quoteMessageId,
       });
       await this.d.log.record(logId, "unavailable", "resource not found");
@@ -157,7 +156,7 @@ export class FileDeliverer implements Deliverer {
       return;
     }
 
-    let status: Parameters<typeof formatLinksMessage>[2] = "not_attempted";
+    let status: Parameters<typeof formatLinksMessage>[1] = "not_attempted";
     let error: string | undefined;
     if (await this.d.settings.get("delivery.sendAttachment")) {
       const caption = buildCaption(detail, flags);
@@ -178,7 +177,7 @@ export class FileDeliverer implements Deliverer {
     if (status !== "sent") {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
-        text: formatLinksMessage(detail, lang, status, flags),
+        text: formatLinksMessage(detail, status, flags),
         quoteMessageId: target.quoteMessageId,
       });
     }
@@ -198,7 +197,7 @@ export class FileDeliverer implements Deliverer {
     status: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked";
     error?: string;
   }> {
-    const [maxMb, allowed, timeoutS, driveOn, audioMode, largeAudio, opusAsMp3, lang, partMb] =
+    const [maxMb, allowed, timeoutS, driveOn, audioMode, largeAudio, opusAsMp3, partMb] =
       await Promise.all([
         this.d.settings.get("delivery.maxAttachmentMb"),
         this.d.settings.get("delivery.allowedMediaTypes"),
@@ -207,7 +206,6 @@ export class FileDeliverer implements Deliverer {
         this.d.settings.get("delivery.audioMode"),
         this.d.settings.get("delivery.largeAudioMode"),
         this.d.settings.get("delivery.opusAsMp3"),
-        target.lang ? Promise.resolve(target.lang) : this.d.settings.get("bot.language"),
         this.d.settings.get("delivery.audioPartMb"),
       ]);
     const maxBytes = maxMb * 1024 * 1024;
@@ -282,7 +280,6 @@ export class FileDeliverer implements Deliverer {
         audioMode,
         largeAudio,
         opusAsMp3,
-        lang,
         partMb,
         cache: key ? { key, ttlMs } : undefined,
       });
@@ -301,18 +298,16 @@ export class FileDeliverer implements Deliverer {
       audioMode: "audio" | "document";
       largeAudio: "split" | "document" | "links";
       opusAsMp3: boolean;
-      lang: "ar" | "en";
       partMb: number;
       cache?: { key: string; ttlMs: number };
     },
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
-    const { target, caption, maxBytes, timeoutS, audioMode, largeAudio, opusAsMp3, lang, partMb } =
-      o;
+    const { target, caption, maxBytes, timeoutS, audioMode, largeAudio, opusAsMp3, partMb } = o;
     // Without a progress reporter, big files at least get a one-line heads-up.
     if (!target.progress && (typeOk[0]?.src.sizeBytes ?? 0) > 8 * 1024 * 1024) {
       await this.d.provider.sendText({
         conversationId: target.conversationId,
-        text: waitNotice(lang),
+        text: waitNotice(),
         quoteMessageId: target.quoteMessageId,
       });
     }
@@ -368,7 +363,6 @@ export class FileDeliverer implements Deliverer {
               caption,
               target,
               audioMode,
-              lang,
               partMb,
               opusAsMp3,
             );
@@ -411,7 +405,6 @@ export class FileDeliverer implements Deliverer {
     caption: string,
     target: DeliveryTarget,
     audioMode: "audio" | "document",
-    lang: "ar" | "en",
     partMb: number,
     opusAsMp3 = false,
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
@@ -422,7 +415,7 @@ export class FileDeliverer implements Deliverer {
     const n = split.files.length;
     await this.d.provider.sendText({
       conversationId: target.conversationId,
-      text: `${caption}\n\n${splitNotice(lang, n)}`,
+      text: `${caption}\n\n${splitNotice(n)}`,
       quoteMessageId: target.quoteMessageId,
     });
     for (const [i, path] of split.files.entries()) {
@@ -432,7 +425,7 @@ export class FileDeliverer implements Deliverer {
         filePath: path,
         fileName: basename(path),
         mimeType: file.mimeType,
-        caption: partLabel(lang, i + 1, n),
+        caption: partLabel(i + 1, n),
         quoteMessageId: target.quoteMessageId,
         audioAsDocument: audioMode === "document",
         opusAsMp3,
@@ -444,12 +437,9 @@ export class FileDeliverer implements Deliverer {
   }
 }
 
-const splitNotice = (l: "ar" | "en", n: number) =>
-  l === "ar"
-    ? `✂️ هذا المقطع أكبر من حد واتساب للصوت (16 ميغابايت)، فأُرسل مقسومًا إلى ${n} أجزاء بالترتيب. للحصول عليه كاملًا في ملف واحد استخدم الروابط أعلاه.`
-    : `✂️ This audio is over WhatsApp's 16 MB limit, so it is sent as ${n} parts in order. For the full file in one piece use the links above.`;
-const partLabel = (l: "ar" | "en", i: number, n: number) =>
-  l === "ar" ? `🎧 الجزء ${i} من ${n}` : `🎧 Part ${i} of ${n}`;
+const splitNotice = (n: number) =>
+  `✂️ This audio is over WhatsApp's 16 MB limit, so it is sent as ${n} parts in order. For the full file in one piece use the links above.`;
+const partLabel = (i: number, n: number) => `🎧 Part ${i} of ${n}`;
 
 /** The channel's text plus whichever source links the admin allows; a sent file gets no follow-up message. */
 export function buildCaption(detail: ResourceDetail, flags: LinkFlags): string {
@@ -462,8 +452,7 @@ export function buildCaption(detail: ResourceDetail, flags: LinkFlags): string {
   return tail ? `${base}\n\n${tail}` : base;
 }
 
-const waitNotice = (l: "ar" | "en") =>
-  l === "ar" ? "⏳ جاري تجهيز الملف…" : "⏳ Preparing the file…";
+const waitNotice = () => "⏳ Preparing the file…";
 
 /** Identifies the exact stored file (source + id + size) so a changed file is never served from the cache. */
 function cacheKeyOf(src: ResourceSourceDetail): string | null {

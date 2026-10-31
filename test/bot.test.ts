@@ -22,14 +22,14 @@ const numOf = (text: string, label: string) => {
 };
 
 describe("stripTrigger", () => {
-  it("handles symbol prefixes, Arabic word variants, extra words and absence", () => {
+  it("handles symbol prefixes, word prefixes, extra words and absence", () => {
     expect(stripTrigger("!5", ["!"])).toBe("5");
-    expect(stripTrigger("! شيت 1-5", ["!"])).toBe("شيت 1-5");
+    expect(stripTrigger("! sheet 1-5", ["!"])).toBe("sheet 1-5");
     expect(stripTrigger("!", ["!"])).toBe("");
     expect(stripTrigger("hello! all", ["!"])).toBeNull();
-    const tr = ["مكتبة", "library"];
-    expect(stripTrigger("المكتبة", ["المكتبة"])).toBe("");
-    expect(stripTrigger("مكتبه كيمياء", tr)).toBe("كيمياء");
+    const tr = ["lib", "library"];
+    expect(stripTrigger("LIB", ["lib"])).toBe("");
+    expect(stripTrigger("lib chemistry", tr)).toBe("chemistry");
     expect(stripTrigger("Library chemistry sheet", tr)).toBe("chemistry sheet");
     expect(stripTrigger("hello everyone", tr)).toBeNull();
   });
@@ -63,25 +63,27 @@ describe("private chat", () => {
     expect(out).toContain("⏳"); // more than one file: a heads-up
     expect(b.provider.sent.map((x) => x.text).join("\n")).toMatch(/https:\/\/t\.me\/BahriMed\/\d+/);
 
-    expect(await run("رجوع")).toContain("Cell Biology"); // back to the semester index
+    expect(await run("back")).toContain("Cell Biology"); // back to the semester index
     expect(await run("٠")).toContain("Main Index");
   });
 
-  it("typing a subject or semester name (Arabic or English) jumps straight to its index", async () => {
+  it("typing a subject or semester name (any case, with typos or unfinished) jumps straight to its index", async () => {
     const { run } = await session(A);
-    expect(await run("كيمياء")).toContain("Chemistry Index");
-    expect(await run("الفصل الثاني")).toContain("Biomolecules");
+    expect(await run("CHEMISTRY")).toContain("Chemistry Index");
+    expect(await run("second semester")).toContain("Biomolecules");
     expect(await run("chemistry")).toContain("Chemistry Index");
     const back = await run("-");
     expect(back).toContain("Biomolecules"); // [ - ] goes back to the previous screen
-    expect(await run("؟ chemistry sheet")).toContain("🔎"); // forced file search
+    expect(await run("? chemistry sheet")).toContain("🔎"); // forced file search
+    expect(await run("chemstry")).toContain("Did you mean"); // a typo is a guess: shown as a choice
+    expect(await run("1")).toContain("Chemistry Index");
   });
 
   it("the help footer uses plain punctuation, not emoji, for navigation", async () => {
     const { run } = await session(B);
     const home = await run("0");
-    expect(home).toContain("[ 0 ] الرئيسية");
-    expect(home).toContain("[ - ] رجوع");
+    expect(home).toContain("[ 0 ] Home");
+    expect(home).toContain("[ - ] Back");
     expect(home).not.toContain("↩️");
     expect(home).not.toContain("🏠");
   });
@@ -115,10 +117,10 @@ describe("private chat", () => {
     const capped = await run("all sheets");
     expect(capped).toContain("2"); // first 2 only
     expect(cell).toContain("Cell division");
-    expect(await run("sheet 99")).toContain("لم أجد");
+    expect(await run("sheet 99")).toContain("couldn't find");
   });
 
-  it("free text searches (Arabic digits and commands work), pages, and reports no results", async () => {
+  it("free text searches (Arabic-Indic digits work too), pages, and reports no results", async () => {
     const bot = await makeBot();
     const run = async (t: string) => {
       const { id, m } = priv(B, t);
@@ -128,9 +130,9 @@ describe("private chat", () => {
     const res = await run("chemistry sheet");
     expect(res).toContain("🔎");
     expect(res).toContain("1. 📄");
-    expect(res).toContain("[ + ] التالي");
-    expect(await run("zzqq nothing")).toContain("لم أجد نتائج");
-    expect(await run("99")).toContain("اختيار غير صحيح");
+    expect(res).toContain("[ + ] Next");
+    expect(await run("zzqq nothing")).toContain("No results");
+    expect(await run("99")).toContain("Invalid choice");
   });
 
   it("session persists across a restart and expires after the TTL", async () => {
@@ -196,7 +198,7 @@ describe("groups: addressed only by prefix or by replying to the bot", () => {
 
     // ...but not with free text (that would be a search the person never asked for)
     const again = bot.provider.lastId();
-    expect(await say(A, "كيمياء", { replyToMessageId: again })).toHaveLength(0);
+    expect(await say(A, "chemistry", { replyToMessageId: again })).toHaveLength(0);
 
     // someone else replying to A's answer is not addressed to the bot
     expect(await say(B, "0", { replyToMessageId: again })).toHaveLength(0);
@@ -228,7 +230,7 @@ describe("groups: addressed only by prefix or by replying to the bot", () => {
   it("answers in a private-only policy with a pointer to private chat, and honours group.mode=disabled", async () => {
     const { bot, say } = await harness({ GROUP_REPLY_MODE: "private_only" });
     await say(A, "!");
-    expect(bot.provider.last()).toContain("الخاص");
+    expect(bot.provider.last()).toContain("privately");
 
     const off = await harness({ GROUP_MODE: "disabled" });
     expect(await off.say(A, "!")).toHaveLength(0);

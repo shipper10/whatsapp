@@ -9,7 +9,7 @@ export interface AlertDeps {
 const SESSION_ERROR =
   /AUTH_KEY|SESSION_REVOKED|SESSION_EXPIRED|USER_DEACTIVATED|UNAUTHORIZED|not authorized/i;
 
-const KIND_AR: Record<JobKind, string> = { telegram: "تيليجرام", drive: "درايف" };
+const KIND_NAME: Record<JobKind, string> = { telegram: "Telegram", drive: "Google Drive" };
 
 /**
  * Tells the admins (on WhatsApp) when a sync keeps failing, once per outage, and again when it recovers.
@@ -25,7 +25,7 @@ export class SyncAlerts {
     if (r.ok) {
       this.fails.set(r.kind, 0);
       if (this.alerted.delete(r.kind))
-        await this.d.notifyAdmins(`✅ عادت مزامنة ${KIND_AR[r.kind]} للعمل.`);
+        await this.d.notifyAdmins(`✅ ${KIND_NAME[r.kind]} sync is working again.`);
       return;
     }
     const n = (this.fails.get(r.kind) ?? 0) + 1;
@@ -38,8 +38,8 @@ export class SyncAlerts {
     const err = (r.error ?? "").replace(/\s+/g, " ").slice(0, 160);
     await this.d.notifyAdmins(
       sessionLost
-        ? `🚨 انتهت جلسة تيليجرام. شغّل telegram:login محليًا وضع الجلسة الجديدة في TELEGRAM_SESSION ثم أعد التشغيل.\n${err}`
-        : `⚠️ فشلت مزامنة ${KIND_AR[r.kind]} ${n} مرات متتالية.\nآخر خطأ: ${err}\nتفاصيل: /status`,
+        ? `🚨 The Telegram login has expired. Run telegram:login locally, put the new session in TELEGRAM_SESSION_STRING and restart.\n${err}`
+        : `⚠️ ${KIND_NAME[r.kind]} sync failed ${n} times in a row.\nLast error: ${err}\nDetails: /status`,
     );
   }
 }

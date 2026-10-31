@@ -1,5 +1,5 @@
 import { Deduper, KeyedMutex, RateLimiter } from "../core/concurrency.js";
-import { normalizeText } from "../core/normalize/arabic.js";
+import { normalizeText } from "../core/normalize/text.js";
 import { MissingParticipantError, sessionKeyFor, sessionKeyString } from "../core/session/key.js";
 import type { SessionStore } from "../core/session/store.js";
 import { WhatsAppProgress } from "../delivery/progress.js";
@@ -7,7 +7,7 @@ import type { Deliverer } from "../delivery/types.js";
 import type { IncomingMessage, WhatsAppProvider } from "../providers/whatsapp/types.js";
 import type { SettingsService } from "../settings/service.js";
 import { parseInput, step } from "./engine.js";
-import { setTextOverrides, t } from "./messages.js";
+import { t } from "./messages.js";
 import type { PrefsPort } from "./prefs.js";
 import type { ReplyTracker } from "./replyTracker.js";
 import type { BotConfig, LibraryPort } from "./types.js";
@@ -28,7 +28,7 @@ export interface HandlerDeps {
   adminHook?: (msg: IncomingMessage) => Promise<boolean>;
   /** Knows who each bot message in a group answered; `provider` must be the one wrapped by it. */
   replies: ReplyTracker;
-  /** Per-person language and new-file subscriptions. */
+  /** New-file subscriptions. */
   prefs?: PrefsPort;
   now?: () => number;
 }
@@ -79,7 +79,6 @@ export function createHandler(deps: HandlerDeps) {
 
   async function process(msg: IncomingMessage) {
     const [
-      defaultLang,
       pageSize,
       maxResults,
       welcome,
@@ -91,14 +90,10 @@ export function createHandler(deps: HandlerDeps) {
       rate,
       rootIndexId,
       maxBatch,
-      aliases,
       showTelegram,
       showDrive,
-      userLanguage,
       notifyEnabled,
-      overrides,
     ] = await Promise.all([
-      deps.settings.get("bot.language"),
       deps.settings.get("search.pageSize"),
       deps.settings.get("search.maxResults"),
       deps.settings.get("text.welcome"),
@@ -110,25 +105,17 @@ export function createHandler(deps: HandlerDeps) {
       deps.settings.get("rateLimit.perParticipantPerMinute"),
       deps.settings.get("library.rootIndexMessageId"),
       deps.settings.get("delivery.maxBatch"),
-      deps.settings.get("library.indexAliases"),
       deps.settings.get("links.telegram"),
       deps.settings.get("links.drive"),
-      deps.settings.get("bot.userLanguage"),
       deps.settings.get("notify.enabled"),
-      deps.settings.get("text.overrides"),
     ]);
-    setTextOverrides(overrides);
-    const chosen = deps.prefs && userLanguage ? await deps.prefs.getLang(msg.participantId) : null;
-    const lang = chosen ?? defaultLang;
     const cfg: BotConfig = {
       pageSize,
       maxResults,
       welcome,
       cohort,
-      lang,
       rootIndexId,
       maxBatch,
-      aliases,
       showLinks: { telegram: showTelegram, drive: showDrive },
     };
 
@@ -165,14 +152,14 @@ export function createHandler(deps: HandlerDeps) {
           if (!answeredThem || parseInput(msg.text).kind === "text") return;
         } else text = stripped === "" ? "0" : stripped;
         if (groupReply === "private_only") {
-          if (stripped !== null) await reply(msg, t("groupPrivateOnly", lang));
+          if (stripped !== null) await reply(msg, t("groupPrivateOnly"));
           return;
         }
       }
 
       const verdict = limiter.check(sessionKeyString(key), rate);
       if (verdict !== "ok") {
-        if (verdict === "warn") await reply(msg, t("rateLimited", lang));
+        if (verdict === "warn") await reply(msg, t("rateLimited"));
         return;
       }
 
@@ -180,9 +167,7 @@ export function createHandler(deps: HandlerDeps) {
 
       const personal = await userCommand(text, {
         prefs: deps.prefs,
-        userLanguage,
         notifyEnabled,
-        lang,
         participantId: msg.participantId,
         conversationId: msg.conversationId,
       });
@@ -198,7 +183,6 @@ export function createHandler(deps: HandlerDeps) {
         const target = {
           conversationId: msg.conversationId,
           quoteMessageId: msg.isGroup ? msg.messageId : undefined,
-          lang: chosen ?? undefined,
         };
         const total = turn.deliver.resources.length + turn.deliver.messages.length;
         const [showProgress, minMb] = await Promise.all([
@@ -210,12 +194,11 @@ export function createHandler(deps: HandlerDeps) {
               provider: deps.provider,
               conversationId: msg.conversationId,
               quoteMessageId: target.quoteMessageId,
-              lang,
               minBytes: minMb * 1024 * 1024,
             })
           : undefined;
         if (sink) await sink.begin(total);
-        else if (total > 1) await reply(msg, t("sendingMany", lang).replace("{n}", String(total)));
+        else if (total > 1) await reply(msg, t("sendingMany").replace("{n}", String(total)));
         const withProgress = { ...target, progress: sink };
         try {
           for (const id of turn.deliver.resources) await deps.deliverer.deliver(id, withProgress);
@@ -242,7 +225,7 @@ export function createHandler(deps: HandlerDeps) {
           "message handling failed",
         );
         try {
-          await reply(msg, t("errorGeneric", await deps.settings.get("bot.language")));
+          await reply(msg, t("errorGeneric"));
         } catch {
           /* provider down: nothing more to do */
         }

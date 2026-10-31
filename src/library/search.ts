@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { normalizeText } from "../core/normalize/arabic.js";
+import { normalizeText } from "../core/normalize/text.js";
 import type { Db } from "../db/client.js";
 import { academicNodes, resourceAliases, resources } from "../db/schema.js";
 

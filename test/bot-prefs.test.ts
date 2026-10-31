@@ -1,68 +1,82 @@
 import { describe, expect, it } from "vitest";
 import { step } from "../src/bot/engine.js";
-import { setTextOverrides } from "../src/bot/messages.js";
 import type { BotConfig, LibraryPort } from "../src/bot/types.js";
 import { makeBot, msg } from "./helpers/bot.js";
 
 const who = (n: string) => ({ conversationId: `${n}@c.us`, participantId: `${n}@c.us` });
 
 describe("personal commands through the handler", () => {
-  it("remembers each person's language and uses it for later replies", async () => {
+  it("answers help and handles subscriptions per chat", async () => {
     const { handler, provider } = await makeBot();
     const a = who("249911000001");
-    const b = who("249911000002");
-    let e = msg({ text: "english", ...a });
-    await handler.handle(e.id, e.m);
-    expect(provider.last()).toContain("Language changed");
-    e = msg({ text: "help", ...a });
+    let e = msg({ text: "help", ...a });
     await handler.handle(e.id, e.m);
     expect(provider.last()).toContain("How to use");
-    e = msg({ text: "مساعدة", ...b }); // someone else keeps the default
+    e = msg({ text: "subscribe", ...a });
     await handler.handle(e.id, e.m);
-    expect(provider.last()).toContain("كيف أستعمل");
-  });
-
-  it("subscribing works and the admin's own wording replaces the built-in text", async () => {
-    const { handler, provider, store } = await makeBot();
-    const c = who("249911000003");
-    store.data["text.overrides"] = { "subscribed.ar": "تم! ستصلك الجديد" };
-    const e = msg({ text: "اشتراك", ...c });
+    expect(provider.last()).toContain("Subscribed");
+    e = msg({ text: "unsubscribe", ...a });
     await handler.handle(e.id, e.m);
-    expect(provider.last()).toBe("تم! ستصلك الجديد");
-    setTextOverrides({});
+    expect(provider.last()).toContain("stopped");
   });
 });
 
-describe("search through the dictionary", () => {
+describe("opening an index by name", () => {
   const cfg = {
     pageSize: 8,
     maxResults: 10,
     welcome: "w",
     cohort: "c",
-    lang: "ar",
     rootIndexId: 0,
     maxBatch: 10,
-    aliases: ["كيمياء حيوية=biochemistry"],
     showLinks: { telegram: true, drive: true },
   } as BotConfig;
+  const lib = (found: { messageId: number; title: string; score: number }[]) =>
+    ({
+      findIndexes: async () => found,
+      indexMessage: async () => null,
+      search: async () => [],
+    }) as unknown as LibraryPort;
+  const first = (l: LibraryPort) => step(l, cfg, null, "x");
 
-  it("also searches the other-language spelling and merges without repeats", async () => {
-    const asked: string[] = [];
-    const lib = {
-      findIndexes: async () => [],
+  it("opens the index straight away for a clear match", async () => {
+    const l = lib([
+      { messageId: 6, title: "Chemistry", score: 1 },
+      { messageId: 7, title: "Biochemistry", score: 0.62 },
+    ]);
+    const turn = await step(l, cfg, (await first(l)).state, "chemistry");
+    expect(turn.state.view).toEqual({ type: "index", messageId: 6 });
+  });
+
+  it("lists candidates, with a 'did you mean', when it is only a guess", async () => {
+    const l = lib([{ messageId: 6, title: "Chemistry", score: 0.73 }]);
+    const turn = await step(l, cfg, (await first(l)).state, "chemstry");
+    expect(turn.state.view.type).toBe("indexes");
+    expect(turn.replies[0]).toContain("Did you mean");
+    expect(turn.replies[0]).toContain("Chemistry");
+  });
+
+  it("lists candidates when several match equally well", async () => {
+    const l = lib([
+      { messageId: 3, title: "First Year 1st Semester", score: 0.9 },
+      { messageId: 4, title: "First Year 2nd Semester", score: 0.9 },
+    ]);
+    const turn = await step(l, cfg, (await first(l)).state, "year");
+    expect(turn.state.view.type).toBe("indexes");
+    expect(turn.replies[0]).not.toContain("Did you mean");
+  });
+
+  it("searches files when no index matches, and '? word' always searches files", async () => {
+    let searched = "";
+    const l = {
+      ...lib([{ messageId: 6, title: "Chemistry", score: 1 }]),
       search: async (q: string) => {
-        asked.push(q);
-        return q.includes("biochemistry")
-          ? [
-              { id: 2, displayName: "Biochem Sheet" },
-              { id: 1, displayName: "Shared" },
-            ]
-          : [{ id: 1, displayName: "Shared" }];
+        searched = q;
+        return [];
       },
     } as unknown as LibraryPort;
-    const first = await step(lib, cfg, null, "x");
-    const turn = await step(lib, cfg, first.state, "؟ كيمياء حيوية");
-    expect(asked.some((q) => q.includes("biochemistry"))).toBe(true);
-    expect(turn.state.items.map((i) => i.id).sort()).toEqual([1, 2]);
+    const s = (await first(l)).state;
+    await step(l, cfg, s, "? chemistry");
+    expect(searched).toBe("chemistry");
   });
 });

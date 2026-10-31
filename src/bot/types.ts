@@ -19,12 +19,11 @@ export interface LibraryPort {
   /** The channel's own index messages, shown as-is with numbered links (no classification needed). */
   indexMessage(messageId: number): Promise<IndexMessage | null>;
   rootIndexId(): Promise<number | null>;
-  /** Index messages whose title matches a typed name (with Arabic aliases), best first. */
+  /** Index messages whose title matches a typed name (forgiving of case, typos and unfinished words), best first. */
   findIndexes(
     query: string,
-    aliases: string[],
     limit: number,
-  ): Promise<{ messageId: number; title: string }[]>;
+  ): Promise<{ messageId: number; title: string; score: number }[]>;
   messageKinds(ids: number[]): Promise<Map<number, MessageKind>>;
   /** Delivery details for any Telegram message id (files that never became resources included). */
   messageDetail(messageId: number): Promise<ResourceDetail | null>;
@@ -67,11 +66,8 @@ export interface BotConfig {
   maxResults: number;
   welcome: string;
   cohort: string;
-  lang: "ar" | "en";
   /** 0 = detect the main index automatically. */
   rootIndexId: number;
-  /** "arabic=english" pairs used when jumping to an index by name. */
-  aliases: string[];
   /** Whether Telegram / Google Drive links may be shown to people. */
   showLinks: { telegram: boolean; drive: boolean };
   /** Most files sent for one request. */

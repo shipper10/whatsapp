@@ -36,6 +36,13 @@
       "when": 1793401354218,
       "tag": "0004_prefs_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793428746728,
+      "tag": "0005_drop_user_prefs",
+      "breakpoints": true
     }
   ]
 }

@@ -75,10 +75,10 @@ describe("admin commands", () => {
     expect(await deps.settings.get("search.pageSize")).toBe(5);
     expect(await run("/set search.pageSize 999")).toContain("❌");
     expect(await run("/set sync.concurrency 4")).toContain("restart");
-    expect(await run("/set group.triggers مكتبة، lib، كتب")).toContain("updated");
-    expect(await deps.settings.get("group.triggers")).toEqual(["مكتبة", "lib", "كتب"]);
-    expect(await run("/set text.welcome أهلاً بكم في المكتبة")).toContain("updated");
-    expect(await deps.settings.get("text.welcome")).toBe("أهلاً بكم في المكتبة");
+    expect(await run("/set group.triggers bot, lib, books")).toContain("updated");
+    expect(await deps.settings.get("group.triggers")).toEqual(["bot", "lib", "books"]);
+    expect(await run("/set text.welcome Welcome to our library")).toContain("updated");
+    expect(await deps.settings.get("text.welcome")).toBe("Welcome to our library");
     expect(await run("/set delivery.sendAttachment false")).toContain("updated");
     expect(await deps.settings.get("delivery.sendAttachment")).toBe(false);
     expect(await run("/set OPENWA_API_KEY x")).toContain("Usage"); // secrets are not settings
@@ -128,10 +128,10 @@ describe("admin commands", () => {
     void subjects;
     const all = await deps.db.query.academicNodes.findMany();
     const bio = all.find((n) => n.name === "Biomolecules");
-    expect(await run(`/alias add ${bio?.id} كيمياء حيوية`)).toContain("finds everything");
-    const hits = await searchResources(deps.db, "كيمياء حيوية", { limit: 3 });
+    expect(await run(`/alias add ${bio?.id} bio chem`)).toContain("finds everything");
+    const hits = await searchResources(deps.db, "bio chem", { limit: 3 });
     expect(hits.length).toBeGreaterThan(0);
-    expect(await run("/alias list")).toContain("كيمياء حيوية");
+    expect(await run("/alias list")).toContain("bio chem");
     const [a] = await deps.db.select().from(resourceAliases);
     expect(await run(`/alias del ${a?.id}`)).toContain("removed");
     expect(await run("/alias add 99999 foo")).toContain("Unknown");

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { normalizeText } from "../core/normalize/arabic.js";
+import { normalizeText } from "../core/normalize/text.js";
 import type { Db } from "../db/client.js";
 import {
   academicNodes,
@@ -83,7 +83,7 @@ function parseValue(key: SettingKey, raw: string): unknown {
   const isArray = def.schema.safeParse([]).success && !def.schema.safeParse("x").success;
   if (isArray && typeof v === "string")
     return v
-      .split(/[,،\s]+/)
+      .split(/[,\s]+/)
       .map((x) => x.trim())
       .filter(Boolean);
   return v;

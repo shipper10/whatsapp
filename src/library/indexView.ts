@@ -33,9 +33,9 @@ const HASHTAG_ONLY = /^(\s*#[\p{L}\p{N}_]+)+\s*$/u;
 const ORDINAL = /^\s*(\d{1,3})\s*[-–.)]/;
 
 const kindOf = (label: string): LinkKind => {
-  if (/🎙|lecture|محاضر/i.test(label)) return "lecture";
-  if (/📔|sheet|شيت|ورق/i.test(label)) return "sheet";
-  if (/🎯|mcq|اسئل|أسئل/i.test(label)) return "mcq";
+  if (/🎙|lecture/i.test(label)) return "lecture";
+  if (/📔|sheet/i.test(label)) return "sheet";
+  if (/🎯|mcq/i.test(label)) return "mcq";
   return "other";
 };
 
@@ -171,7 +171,7 @@ export function chunkText(text: string, max = 3500): string[] {
 export function cleanCaption(text: string, max = 900): string {
   const keep = text
     .split("\n")
-    .filter((l) => !/^\s*↩️/.test(l) && !/return to|العودة إلى/i.test(l) && !HASHTAG_ONLY.test(l))
+    .filter((l) => !/^\s*↩️/.test(l) && !/return to/i.test(l) && !HASHTAG_ONLY.test(l))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

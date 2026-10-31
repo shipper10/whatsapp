@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { DbPrefs } from "../src/bot/prefs.js";
 import { resources, subscriptions } from "../src/db/schema.js";
 import { SyncAlerts } from "../src/jobs/alerts.js";
 import type { JobReport } from "../src/jobs/scheduler.js";
@@ -34,10 +33,10 @@ describe("SyncAlerts", () => {
     await a.onReport(rep(false, "boom"));
     await a.onReport(rep(false, "boom"));
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("3 مرات");
+    expect(sent[0]).toContain("3 times");
     await a.onReport(rep(true));
     expect(sent).toHaveLength(2);
-    expect(sent[1]).toContain("عادت");
+    expect(sent[1]).toContain("working again");
   });
 
   it("a success resets the count; threshold 0 disables", async () => {
@@ -56,7 +55,7 @@ describe("SyncAlerts", () => {
     const { a, sent } = make();
     await a.onReport(rep(false, "AUTH_KEY_UNREGISTERED"));
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("انتهت جلسة تيليجرام");
+    expect(sent[0]).toContain("Telegram login has expired");
   });
 });
 
@@ -71,7 +70,6 @@ describe("new-files notices", () => {
       db,
       provider,
       settings: new SettingsService(store, {}, 0),
-      prefs: new DbPrefs(db),
       logger: { info: () => {}, warn: () => {} },
       now: () => new Date(nowMs),
     };
@@ -91,7 +89,7 @@ describe("new-files notices", () => {
     await addResource(3);
     expect(await sendNewFilesDigest(deps)).toEqual({ sent: 1, files: 2 });
     expect(provider.sent[0]?.conversationId).toBe("a@c.us");
-    expect(provider.sent[0]?.text).toContain("2 ملفات");
+    expect(provider.sent[0]?.text).toContain("2 new files");
     expect(provider.sent[0]?.text).toContain("Lecture 3");
 
     expect(await sendNewFilesDigest(deps)).toEqual({ sent: 0, files: 0 }); // nothing new

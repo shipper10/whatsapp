@@ -27,7 +27,6 @@ import { SyncAlerts } from "./jobs/alerts.js";
 import { startKeepAlive } from "./jobs/keepalive.js";
 import { SyncScheduler } from "./jobs/scheduler.js";
 import { classifyAndApply } from "./library/apply.js";
-import { indexTitles } from "./library/browse.js";
 import { DbLibrary } from "./library/dbLibrary.js";
 import { createLogger } from "./logger.js";
 import { sendNewFilesDigest } from "./notify/digest.js";
@@ -165,7 +164,7 @@ const scheduler = new SyncScheduler({
   note: (kind) => syncNotes.get(kind),
   onReport: async (report) => {
     await alerts.onReport(report);
-    if (report.ok) await sendNewFilesDigest({ db, provider, settings, prefs, logger: log });
+    if (report.ok) await sendNewFilesDigest({ db, provider, settings, logger: log });
   },
   classify: async () => classifyAndApply(db, await channelUsername()),
 });
@@ -223,9 +222,7 @@ const server = createAppServer({
   panel: env.ADMIN_HTTP_TOKEN
     ? createPanel({
         token: env.ADMIN_HTTP_TOKEN,
-        settings,
         logger: log,
-        indexTitles: async () => (await indexTitles(db)).map((t) => t.title),
         overview: async () => {
           const st = deliverer.stats();
           const w = baileys?.status();
@@ -234,7 +231,7 @@ const server = createAppServer({
             ...base,
             whatsapp: baileys
               ? w?.state === "open"
-                ? "✅ متصل"
+                ? "Connected"
                 : `⚠️ ${w?.state ?? "?"}`
               : "OpenWA",
             syncs: (["telegram", "drive"] as const).map((kind) => {
@@ -245,7 +242,7 @@ const server = createAppServer({
                 ok: r ? r.ok : null,
                 at: r?.finishedAt ?? null,
                 error: r?.error,
-                running: run ? (syncNotes.get(kind) ?? "تعمل الآن") : undefined,
+                running: run ? (syncNotes.get(kind) ?? "running now") : undefined,
               };
             }),
             load: {

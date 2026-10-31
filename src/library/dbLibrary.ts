@@ -28,8 +28,8 @@ export class DbLibrary implements LibraryPort {
   detail = (id: number) => resourceDetail(this.db, id);
   indexMessage = (messageId: number) => indexMessage(this.db, messageId);
   rootIndexId = () => rootIndexId(this.db);
-  findIndexes = async (query: string, aliases: string[], limit: number) =>
-    matchIndexes(await indexTitles(this.db), query, aliases, limit);
+  findIndexes = async (query: string, limit: number) =>
+    matchIndexes(await indexTitles(this.db), query, limit);
   messageKinds = (ids: number[]) => messageKinds(this.db, ids);
   messageDetail = (messageId: number) => telegramMessageDetail(this.db, messageId);
   albumMessageIds = (messageId: number) => albumMessageIds(this.db, messageId);

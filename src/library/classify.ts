@@ -1,4 +1,4 @@
-import { normalizeText } from "../core/normalize/arabic.js";
+import { normalizeText } from "../core/normalize/text.js";
 import type { RawEntity } from "../telegram/types.js";
 
 /**
@@ -75,7 +75,7 @@ export interface LibraryPlan {
 // ---------- text helpers ----------
 
 const KEYCAP = /[0-9#*]️?⃣/g;
-const RETURN_LABEL = /^\s*(return|back)\b|رجوع|العودة/i;
+const RETURN_LABEL = /^\s*(return|back)\b/i;
 const SEPARATOR = /^[\s─━—–\-_=~·•]{5,}$/;
 
 export function cleanLabel(s: string): string {

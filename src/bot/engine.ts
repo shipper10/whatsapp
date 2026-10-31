@@ -1,12 +1,12 @@
-import { normalizeText } from "../core/normalize/arabic.js";
+import { normalizeText, toAsciiDigits } from "../core/normalize/text.js";
 import { chunkText, marker, renderIndex } from "../library/indexView.js";
-import { expandQuery, parsePairs } from "../library/translations.js";
 import { clip, t } from "./messages.js";
 import { parseSelection, resolveTyped, type Selection } from "./selection.js";
 import type { BotConfig, Item, LibraryPort, SessionState, Turn, View } from "./types.js";
 
-const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
 const MAX_STACK = 20;
+/** A name match at least this good (and clearly better than the next) opens the index directly. */
+const SURE = 0.85;
 
 export const emptyState = (): SessionState => ({
   view: { type: "home" },
@@ -21,9 +21,6 @@ type Command =
   | { kind: "text"; text: string };
 
 const WORDS: Record<string, "home" | "back" | "next" | "prev" | "recent"> = {
-  جديد: "recent",
-  الجديد: "recent",
-  احدث: "recent",
   new: "recent",
   latest: "recent",
   recent: "recent",
@@ -31,28 +28,16 @@ const WORDS: Record<string, "home" | "back" | "next" | "prev" | "recent"> = {
   menu: "home",
   start: "home",
   "0": "home",
-  الرئيسيه: "home",
-  القائمه: "home",
-  قائمه: "home",
-  ابدا: "home",
   back: "back",
-  رجوع: "back",
-  ارجع: "back",
+  return: "back",
   next: "next",
-  التالي: "next",
-  المزيد: "next",
-  التاليه: "next",
+  more: "next",
   prev: "prev",
   previous: "prev",
-  السابق: "prev",
-  السابقه: "prev",
 };
 
 export function parseInput(raw: string): Command {
-  const s = raw
-    .trim()
-    .replace(/[٠-٩]/g, (d) => String(AR_DIGITS.indexOf(d)))
-    .replace(/\s+/g, " ");
+  const s = toAsciiDigits(raw.trim()).replace(/\s+/g, " ");
   if (s === "-" || s === "<") return { kind: s === "-" ? "back" : "prev" };
   if (s === "+" || s === ">") return { kind: "next" };
   if (s === "0") return { kind: "home" };
@@ -74,14 +59,14 @@ function renderList(
   extra?: string,
 ): string {
   const lines = [title, ""];
-  if (items.length === 0) lines.push(t("empty", cfg.lang));
+  if (items.length === 0) lines.push(t("empty"));
   items.forEach((it, i) =>
     lines.push(`${i + 1}. ${icon(it)} ${clip(it.label)}`.replace("  ", " ")),
   );
   lines.push("", "──────────");
-  const nav = [t("footerNav", cfg.lang)];
-  if (hasNext) nav.push(t("next", cfg.lang));
-  if (page > 1) nav.push(t("prev", cfg.lang));
+  const nav = [t("footerNav")];
+  if (hasNext) nav.push(t("next"));
+  if (page > 1) nav.push(t("prev"));
   lines.push(nav.join("  •  "));
   if (extra) lines.push(extra);
   return lines.join("\n");
@@ -91,7 +76,7 @@ async function homeItems(lib: LibraryPort, cfg: BotConfig): Promise<Item[]> {
   let nodes = await lib.children(null);
   if (nodes.length === 1 && nodes[0]) nodes = await lib.children(nodes[0].id); // single root: show its children
   const items: Item[] = nodes.map((n) => ({ kind: "node", id: n.id, label: n.name }));
-  items.push({ kind: "action", id: "recent", label: t("recent", cfg.lang) });
+  items.push({ kind: "action", id: "recent", label: t("recent") });
   return items;
 }
 
@@ -109,7 +94,7 @@ async function renderIndexView(
   header?: string,
 ): Promise<Rendered> {
   const msg = await lib.indexMessage(messageId);
-  if (!msg) return { texts: [t("indexMissing", cfg.lang)], items: [], hasNext: false };
+  if (!msg) return { texts: [t("indexMissing")], items: [], hasNext: false };
   const r = renderIndex(msg, {
     hideUrl: (u) =>
       (!cfg.showLinks.drive && /(^|\.)drive\.google\.com|docs\.google\.com/i.test(u)) ||
@@ -125,7 +110,7 @@ async function renderIndexView(
   }));
   const body = header ? `${header}\n\n${r.text}` : r.text;
   const texts = chunkText(body);
-  texts[texts.length - 1] = `${texts[texts.length - 1]}\n\n${t("indexFooter", cfg.lang)}`;
+  texts[texts.length - 1] = `${texts[texts.length - 1]}\n\n${t("indexFooter")}`;
   return { texts, items, hasNext: false };
 }
 
@@ -133,7 +118,7 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
   const size = cfg.pageSize;
   if (view.type === "index") return renderIndexView(lib, cfg, view.messageId);
   if (view.type === "indexes") {
-    const found = await lib.findIndexes(view.query, cfg.aliases, 10);
+    const found = await lib.findIndexes(view.query, 10);
     const items: Item[] = found.map((f) => ({
       kind: "link",
       id: f.messageId,
@@ -143,12 +128,14 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
       block: 1,
     }));
     const lines = found.map((f, i) => `${marker(i + 1)} ${clip(f.title, 80)}`);
+    const unsure = (found[0]?.score ?? 1) < SURE;
     const text = [
-      `${t("indexesTitle", cfg.lang)} «${clip(view.query, 40)}»`,
+      `${t("indexesTitle")} «${clip(view.query, 40)}»`,
+      ...(unsure ? [t("didYouMean")] : []),
       "",
       ...lines,
       "",
-      t("footerNav", cfg.lang),
+      t("footerNav"),
     ].join("\n");
     return { texts: [text], items, hasNext: false };
   }
@@ -165,7 +152,7 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
           (it, i) => `${i + 1}. ${it.kind === "action" ? "" : `${icon(it)} `}${clip(it.label)}`,
         ),
       )
-      .concat(["", "──────────", t("searchHint", cfg.lang)])
+      .concat(["", "──────────", t("searchHint")])
       .join("\n");
     return { texts: [text], items, hasNext: false };
   }
@@ -192,7 +179,7 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
     }
     const title = `📂 ${clip((info?.path ?? []).slice(-2).join(" › ") || "…", 100)}`;
     return {
-      texts: [renderList(title, items, hasNext, view.page, cfg, t("searchHint", cfg.lang))],
+      texts: [renderList(title, items, hasNext, view.page, cfg, t("searchHint"))],
       items,
       hasNext,
     };
@@ -201,28 +188,20 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
   if (view.type === "search") {
     const offset = (view.page - 1) * size;
     const cap = Math.max(0, cfg.maxResults - offset);
-    const res = await searchWithTranslations(lib, cfg, view.query, Math.min(size, cap) + 1, offset);
+    const res = await lib.search(view.query, Math.min(size, cap) + 1, offset);
     const shown = res.slice(0, Math.min(size, cap));
     const hasNext = res.length > shown.length && offset + shown.length < cfg.maxResults;
     const items = shown.map((r): Item => ({ kind: "resource", id: r.id, label: r.displayName }));
     if (items.length === 0 && view.page === 1) {
       return {
-        texts: [
-          `${t("searchTitle", cfg.lang)} «${clip(view.query, 40)}»\n\n${t("noResults", cfg.lang)}`,
-        ],
+        texts: [`${t("searchTitle")} «${clip(view.query, 40)}»\n\n${t("noResults")}`],
         items,
         hasNext: false,
       };
     }
     return {
       texts: [
-        renderList(
-          `${t("searchTitle", cfg.lang)} «${clip(view.query, 40)}»`,
-          items,
-          hasNext,
-          view.page,
-          cfg,
-        ),
+        renderList(`${t("searchTitle")} «${clip(view.query, 40)}»`, items, hasNext, view.page, cfg),
       ],
       items,
       hasNext,
@@ -236,38 +215,10 @@ async function renderView(lib: LibraryPort, cfg: BotConfig, view: View): Promise
     .map((r): Item => ({ kind: "resource", id: r.id, label: r.displayName }));
   const hasNext = res.length > size && offset + size < cfg.maxResults * 3;
   return {
-    texts: [renderList(t("recent", cfg.lang), items, hasNext, view.page, cfg)],
+    texts: [renderList(t("recent"), items, hasNext, view.page, cfg)],
     items,
     hasNext,
   };
-}
-
-/**
- * File search that also tries the dictionary's other-language spellings of the query ("كيمياء حيوية" ->
- * "biochemistry"), merging the results without repeats. The plain query always comes first.
- */
-async function searchWithTranslations(
-  lib: LibraryPort,
-  cfg: BotConfig,
-  query: string,
-  limit: number,
-  offset: number,
-) {
-  const variants = expandQuery(query, parsePairs(cfg.aliases), 3);
-  if (variants.length <= 1) return lib.search(query, limit, offset);
-  const need = offset + limit;
-  const seen = new Set<number>();
-  const merged: Awaited<ReturnType<LibraryPort["search"]>> = [];
-  for (const v of [query, ...variants.filter((x) => x !== normalizeText(query))]) {
-    for (const r of await lib.search(v, need, 0)) {
-      if (!seen.has(r.id)) {
-        seen.add(r.id);
-        merged.push(r);
-      }
-    }
-    if (merged.length >= need) break;
-  }
-  return merged.slice(offset, offset + limit);
 }
 
 const pagedView = (v: View, page: number): View =>
@@ -312,7 +263,7 @@ export async function step(
         return show(view, stack);
       const page = cmd.kind === "next" ? view.page + 1 : view.page - 1;
       if ((cmd.kind === "next" && !state.hasNext) || page < 1) {
-        prefix = t("noMore", cfg.lang);
+        prefix = t("noMore");
         return show(view, stack);
       }
       return show(pagedView(view, page), stack);
@@ -344,13 +295,13 @@ export async function step(
         );
         picks = hits.map((h) => state.items[h.n - 1]).filter((x): x is Item => !!x);
         if (picks.length === 0) {
-          prefix = t("noTyped", cfg.lang);
+          prefix = t("noTyped");
           return show(view, stack);
         }
       } else {
         picks = cmd.sel.nums.map((n) => state.items[n - 1]).filter((x): x is Item => !!x);
         if (picks.length === 0) {
-          prefix = t("invalid", cfg.lang);
+          prefix = t("invalid");
           return show(view, stack);
         }
       }
@@ -383,17 +334,17 @@ export async function step(
       const notes: string[] = [];
       let total = resources.length + messages.length;
       if (total > cfg.maxBatch) {
-        notes.push(t("capped", cfg.lang).replace("{n}", String(cfg.maxBatch)));
+        notes.push(t("capped").replace("{n}", String(cfg.maxBatch)));
         const keepMsgs = Math.max(0, cfg.maxBatch - resources.length);
         resources.splice(cfg.maxBatch);
         messages.splice(keepMsgs);
         total = resources.length + messages.length;
       }
-      if (skippedNav) notes.push(t("navSkipped", cfg.lang));
+      if (skippedNav) notes.push(t("navSkipped"));
       if (missing.length > 0)
-        notes.push(`${t("notSynced", cfg.lang)} ${missing.map((m) => `#${m}`).join(" ")}`);
+        notes.push(`${t("notSynced")} ${missing.map((m) => `#${m}`).join(" ")}`);
       if (total === 0) {
-        prefix = notes.join("\n") || t("invalid", cfg.lang);
+        prefix = notes.join("\n") || t("invalid");
         return show(view, stack);
       }
       return {
@@ -405,24 +356,26 @@ export async function step(
     case "text": {
       const query = cmd.text.slice(0, 100);
       if (normalizeText(query).length === 0) {
-        prefix = t("invalid", cfg.lang);
+        prefix = t("invalid");
         return show(view, stack);
       }
       // "? word" forces a file search; anything else first tries to jump straight to a matching index.
-      const forced = /^\s*(?:[?؟]|بحث\s|search\s)\s*(.*)$/i.exec(query);
+      const forced = /^\s*(?:\?|search\s)\s*(.*)$/i.exec(query);
       const q = (forced ? (forced[1] ?? "") : query).trim();
       if (forced && normalizeText(q).length === 0) {
-        prefix = t("invalid", cfg.lang);
+        prefix = t("invalid");
         return show(view, stack);
       }
       if (!forced) {
-        const idx = await lib.findIndexes(q, cfg.aliases, 8);
-        const next: View | null =
-          idx.length === 1 && idx[0]
-            ? { type: "index", messageId: idx[0].messageId }
-            : idx.length > 1
-              ? { type: "indexes", query: q }
-              : null;
+        const idx = await lib.findIndexes(q, 8);
+        const top = idx[0];
+        const clear =
+          top && top.score >= SURE && (idx[1] === undefined || idx[1].score <= top.score - 0.1);
+        const next: View | null = clear
+          ? { type: "index", messageId: top.messageId }
+          : idx.length > 0
+            ? { type: "indexes", query: q }
+            : null;
         if (next) return show(next, view.type === "indexes" ? stack : [...stack, view]);
       }
       stack = view.type === "search" ? stack : [...stack, view];

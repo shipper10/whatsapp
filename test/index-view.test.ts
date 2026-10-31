@@ -72,35 +72,35 @@ describe("renderIndex on the real channel indexes", () => {
 });
 
 describe("parseSelection", () => {
-  it("parses numbers, ranges and lists in Arabic and English", () => {
+  it("parses numbers, ranges and lists (Arabic-Indic digits work too)", () => {
     expect(parseSelection("5")).toEqual({ kind: "numbers", nums: [5] });
     expect(parseSelection("1-5")).toEqual({ kind: "numbers", nums: [1, 2, 3, 4, 5] });
-    expect(parseSelection("١ الى ٣")).toEqual({ kind: "numbers", nums: [1, 2, 3] });
-    expect(parseSelection("من 2 إلى 4")).toEqual({ kind: "numbers", nums: [2, 3, 4] });
+    expect(parseSelection("١ to ٣")).toEqual({ kind: "numbers", nums: [1, 2, 3] });
+    expect(parseSelection("from 2 to 4")).toEqual({ kind: "numbers", nums: [2, 3, 4] });
     expect(parseSelection("1,3,5-6")).toEqual({ kind: "numbers", nums: [1, 3, 5, 6] });
-    expect(parseSelection("1 و 3")).toEqual({ kind: "numbers", nums: [1, 3] });
+    expect(parseSelection("1 and 3")).toEqual({ kind: "numbers", nums: [1, 3] });
     expect(parseSelection("5-3")).toEqual({ kind: "numbers", nums: [3, 4, 5] });
   });
   it("parses typed batches", () => {
-    expect(parseSelection("شيت 1-5")).toEqual({
+    expect(parseSelection("sheet 1-5")).toEqual({
       kind: "typed",
       type: "sheet",
       nums: [1, 2, 3, 4, 5],
     });
-    expect(parseSelection("شيتات من 1 الى 5")).toEqual({
+    expect(parseSelection("sheets from 1 to 5")).toEqual({
       kind: "typed",
       type: "sheet",
       nums: [1, 2, 3, 4, 5],
     });
     expect(parseSelection("lecture 2")).toEqual({ kind: "typed", type: "lecture", nums: [2] });
-    expect(parseSelection("محاضرة 3-4")).toEqual({ kind: "typed", type: "lecture", nums: [3, 4] });
-    expect(parseSelection("كل الشيتات")).toEqual({ kind: "typed", type: "sheet", nums: null });
+    expect(parseSelection("lec 3-4")).toEqual({ kind: "typed", type: "lecture", nums: [3, 4] });
+    expect(parseSelection("all sheets")).toEqual({ kind: "typed", type: "sheet", nums: null });
     expect(parseSelection("all mcq")).toEqual({ kind: "typed", type: "mcq", nums: null });
   });
   it("leaves ordinary text for search", () => {
     expect(parseSelection("chemistry sheet")).toBeNull();
-    expect(parseSelection("شيت")).toBeNull();
-    expect(parseSelection("شيت الكيمياء 1")).toBeNull();
+    expect(parseSelection("sheet")).toBeNull();
+    expect(parseSelection("sheet chemistry 1")).toBeNull();
     expect(parseSelection("hello")).toBeNull();
     expect(parseSelection("1-1000000")).toBeNull();
   });

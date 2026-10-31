@@ -21,7 +21,6 @@ export interface ProgressOptions {
   provider: WhatsAppProvider;
   conversationId: string;
   quoteMessageId?: string;
-  lang: "ar" | "en";
   /** A single file smaller than this shows no status (unless it had to wait in the queue). */
   minBytes: number;
   /** Least time between edits of the status message (WhatsApp tolerates a few per ten seconds). */
@@ -36,13 +35,13 @@ const bar = (pct: number) => {
   const step = Math.max(0, Math.min(10, Math.floor(pct / 10)));
   return `[${"█".repeat(step)}${"░".repeat(10 - step)}] ${step * 10}%`;
 };
-const fmtDur = (s: number, ar: boolean) => {
+const fmtDur = (s: number) => {
   const r = Math.max(1, Math.round(s));
-  if (r < 90) return ar ? `${r} ث` : `${r}s`;
+  if (r < 90) return `${r}s`;
   const m = Math.round(r / 60);
-  if (m < 90) return ar ? `${m} د` : `${m} min`;
+  if (m < 90) return `${m} min`;
   const h = Math.floor(m / 60);
-  return ar ? `${h} س ${m % 60} د` : `${h}h ${m % 60}m`;
+  return `${h}h ${m % 60}m`;
 };
 const clip = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -180,68 +179,49 @@ export class WhatsAppProgress implements ProgressSink {
   }
 
   private finalText(): string {
-    const ar = this.o.lang === "ar";
     const n = this.ok + this.failed;
     if (this.failed === 0) {
-      return ar
-        ? `✅ تم إرسال ${this.ok === 1 ? "الملف" : `${this.ok} ملفات`}`
-        : `✅ Sent ${this.ok === 1 ? "the file" : `${this.ok} files`}`;
+      return `✅ Sent ${this.ok === 1 ? "the file" : `${this.ok} files`}`;
     }
-    return ar
-      ? `⚠️ أُرسل ${this.ok} من ${n}. تعذّر إرسال ${this.failed}.`
-      : `⚠️ Sent ${this.ok} of ${n}; ${this.failed} could not be sent.`;
+    return `⚠️ Sent ${this.ok} of ${n}; ${this.failed} could not be sent.`;
   }
 
   private render(): string {
-    const ar = this.o.lang === "ar";
     const head =
       this.total > 1
         ? `📦 ${this.index || 1}/${this.total}${this.name ? ` • ${clip(this.name)}` : ""}`
-        : `📦 ${clip(this.name || (ar ? "الملف" : "File"))}`;
+        : `📦 ${clip(this.name || "File")}`;
     let line: string;
     if (this.phase === "queued") {
-      line = ar
-        ? `⏳ بالانتظار — ترتيبك ${this.position}`
-        : `⏳ Waiting in line — you are number ${this.position}`;
+      line = `⏳ Waiting in line — you are number ${this.position}`;
     } else if (this.phase === "download") {
       const t = this.total_;
       line =
-        t > 0
-          ? `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"} ${bar((this.done / t) * 100)} (${fmtMb(t)} MB)`
-          : `${ar ? "⬇️ تنزيل" : "⬇️ Downloading"}…`;
+        t > 0 ? `⬇️ Downloading ${bar((this.done / t) * 100)} (${fmtMb(t)} MB)` : `⬇️ Downloading…`;
     } else if (this.phase === "upload") {
-      line = this.uploadLine(ar);
+      line = this.uploadLine();
     } else {
-      line = ar ? "⏳ جاري التجهيز…" : "⏳ Getting ready…";
+      line = "⏳ Getting ready…";
     }
     return `${head}\n${line}`;
   }
 
-  private uploadLine(ar: boolean): string {
+  private uploadLine(): string {
     const now = this.now();
     const secs = Math.round((now - this.uploadStartedAt) / 1000);
-    const head = ar ? "⬆️ إرسال" : "⬆️ Sending";
+    const head = "⬆️ Sending";
     if (this.upTotal <= 0 || this.upSent <= 0) {
-      return ar
-        ? `${head} إلى واتساب… بدء الاتصال (${secs}ث)`
-        : `${head} to WhatsApp… connecting (${secs}s)`;
+      return `${head} to WhatsApp… connecting (${secs}s)`;
     }
     const pct = (this.upSent / this.upTotal) * 100;
     const stalled = Math.round((now - this.lastAdvanceAt) / 1000);
     if (stalled >= 45) {
-      return ar
-        ? `${head} ${bar(pct)} ⚠️ لا يتقدم منذ ${stalled}ث (قد يكون الاتصال بطيئًا)`
-        : `${head} ${bar(pct)} ⚠️ no progress for ${stalled}s (connection may be slow)`;
+      return `${head} ${bar(pct)} ⚠️ no progress for ${stalled}s (connection may be slow)`;
     }
     const mbps = this.speed / MB;
     const left = this.speed > 1024 ? Math.max(0, (this.upTotal - this.upSent) / this.speed) : null;
     const speedTxt = this.speed > 1024 ? `${mbps.toFixed(mbps >= 10 ? 0 : 1)} MB/s` : "…";
-    const eta =
-      left === null
-        ? ""
-        : ar
-          ? ` — متبقي ~${fmtDur(left, true)}`
-          : ` — ~${fmtDur(left, false)} left`;
+    const eta = left === null ? "" : ` — ~${fmtDur(left)} left`;
     return `${head} ${bar(pct)} ${speedTxt}${eta}`;
   }
 

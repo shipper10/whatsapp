@@ -1,4 +1,4 @@
-import { extractHashtags } from "../core/normalize/arabic.js";
+import { extractHashtags } from "../core/normalize/text.js";
 import type { RawTelegramMessage, TelegramRecord } from "./types.js";
 
 export interface ParseContext {
@@ -34,7 +34,7 @@ export function parseMessage(raw: RawTelegramMessage, ctx: ParseContext): Telegr
       const id = Number(m[1]);
       internalIds.push(id);
       const label = slice(raw.text, e.offset, e.length);
-      if (/^\s*(return|back)\b|رجوع|العودة/i.test(label)) {
+      if (/^\s*(return|back)\b/i.test(label)) {
         returnIndexId ??= id;
       }
     }

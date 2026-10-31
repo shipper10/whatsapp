@@ -31,37 +31,25 @@ export function visibleLinks(
 
 export function formatLinksMessage(
   d: ResourceDetail,
-  lang: "ar" | "en",
   attachment: "sent" | "failed" | "not_attempted" | "too_large" | "type_blocked",
   flags: LinkFlags = ALL_LINKS,
 ): string {
   const links = visibleLinks(d, flags);
   const withLinks = links.length > 0;
   const lines = [`*${d.displayName}*`];
-  if (attachment === "sent") lines.push(lang === "ar" ? "📎 تم إرسال الملف." : "📎 File sent.");
+  if (attachment === "sent") lines.push("📎 File sent.");
   else if (attachment === "too_large")
-    lines.push(
-      lang === "ar"
-        ? `📎 الملف كبير لإرساله هنا.${withLinks ? " افتحه من الروابط:" : ""}`
-        : `📎 The file is too large to send here.${withLinks ? " Open it here:" : ""}`,
-    );
+    lines.push(`📎 The file is too large to send here.${withLinks ? " Open it here:" : ""}`);
   else if (attachment === "type_blocked")
-    lines.push(
-      lang === "ar"
-        ? `📎 هذا النوع من الملفات لا يُرسل هنا.${withLinks ? " افتحه من الروابط:" : ""}`
-        : `📎 This file type isn't sent here.${withLinks ? " Open it here:" : ""}`,
-    );
+    lines.push(`📎 This file type isn't sent here.${withLinks ? " Open it here:" : ""}`);
   else if (attachment === "failed")
     lines.push(
-      lang === "ar"
-        ? `⚠️ تعذّر إرسال الملف.${withLinks ? " يمكنك فتحه من الروابط:" : " حاول مرة أخرى لاحقاً."}`
-        : `⚠️ I couldn't send the file.${withLinks ? " You can open it here:" : " Please try again later."}`,
+      `⚠️ I couldn't send the file.${withLinks ? " You can open it here:" : " Please try again later."}`,
     );
   for (const l of links)
     lines.push(`${l.type === "telegram" ? "✈️" : "📁"} ${LABEL[l.type]}: ${l.url}`);
   // "unavailable" only when no link exists at all; links hidden by the admin are not a missing file
   const noUrlAtAll = !d.sources.some((s) => s.url) && attachment !== "sent";
-  if (noUrlAtAll || (!withLinks && attachment === "not_attempted"))
-    lines.push(t("unavailable", lang));
+  if (noUrlAtAll || (!withLinks && attachment === "not_attempted")) lines.push(t("unavailable"));
   return lines.join("\n");
 }

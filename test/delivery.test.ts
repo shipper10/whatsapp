@@ -143,7 +143,7 @@ describe("FileDeliverer", () => {
     const { provider, deliverer, records, tempDir } = await setup(detail([tg]), [f]);
     await deliverer.deliver(1, target);
     expect(provider.docs).toHaveLength(0);
-    expect(provider.last()).toContain("تعذّر إرسال الملف");
+    expect(provider.last()).toContain("couldn't send the file");
     expect(provider.last()).toContain("https://t.me/BahriMed/59");
     expect(records[0]).toEqual({ outcome: "links_only", error: "Error" });
     expect(JSON.stringify(records)).not.toContain("secret");
@@ -203,8 +203,8 @@ describe("FileDeliverer", () => {
     const { provider, deliverer, records } = await setup(detail([tg]), [f]);
     provider.sendDocument = async () => ({ confirmed: false, error: "HTTP 503" });
     await deliverer.deliver(1, target);
-    expect(provider.last()).not.toContain("تم إرسال الملف");
-    expect(provider.last()).toContain("تعذّر");
+    expect(provider.last()).not.toContain("File sent");
+    expect(provider.last()).toContain("couldn't send");
     expect(records[0]).toMatchObject({ outcome: "links_only", error: "HTTP 503" });
   });
 
@@ -214,13 +214,13 @@ describe("FileDeliverer", () => {
     const a = await setup(detail([big]), [f], { "delivery.maxAttachmentMb": 1 });
     await a.deliverer.deliver(1, target);
     expect(f.calls).toBe(0);
-    expect(a.provider.last()).toContain("كبير");
+    expect(a.provider.last()).toContain("too large");
     expect(a.provider.last()).toContain("https://t.me/BahriMed/59");
 
     const b = await setup(detail([tg]), [f], { "delivery.allowedMediaTypes": ["image/*"] });
     await b.deliverer.deliver(1, target);
     expect(f.calls).toBe(0);
-    expect(b.provider.last()).toContain("لا يُرسل");
+    expect(b.provider.last()).toContain("isn't sent");
 
     const c = await setup(detail([tg]), [f], { "delivery.sendAttachment": false });
     await c.deliverer.deliver(1, target);
@@ -244,7 +244,7 @@ describe("FileDeliverer", () => {
     const t0 = Date.now();
     await deliverer.deliver(1, target);
     expect(Date.now() - t0).toBeLessThan(5000);
-    expect(provider.last()).toContain("تعذّر");
+    expect(provider.last()).toContain("couldn't send");
     expect(records[0]?.error).toBe("Error");
     expect(readdirSync(tempDir)).toEqual([]);
   });
@@ -263,12 +263,12 @@ describe("FileDeliverer", () => {
   it("missing resource or no links at all: says unavailable, never invents links", async () => {
     const a = await setup(null, []);
     await a.deliverer.deliver(1, target);
-    expect(a.provider.last()).toContain("غير متاح");
+    expect(a.provider.last()).toContain("unavailable");
     expect(a.records[0]?.outcome).toBe("unavailable");
 
     const b = await setup(detail([{ ...tg, url: null }]), [new FakeFetcher("telegram", "fail")]);
     await b.deliverer.deliver(1, target);
-    expect(b.provider.last()).toContain("غير متاح");
+    expect(b.provider.last()).toContain("unavailable");
     expect(b.provider.last()).not.toContain("http");
     expect(b.records[0]?.outcome).toBe("unavailable");
   });
@@ -320,9 +320,9 @@ describe("FileDeliverer", () => {
     });
     await deliverer.deliver(1, target);
     const text = provider.last();
-    expect(text).toContain("تعذّر إرسال الملف");
+    expect(text).toContain("couldn't send the file");
     expect(text).not.toContain("http");
-    expect(text).not.toContain("غير متاح");
+    expect(text).not.toContain("unavailable");
   });
 
   it("uses the Telegram text (without navigation lines or hashtags) as the caption", async () => {
@@ -373,11 +373,7 @@ describe("helpers", () => {
     expect(existsSync(join(root, "keep"))).toBe(true);
   });
   it("formatLinksMessage omits missing links and dedupes identical urls", () => {
-    const text = formatLinksMessage(
-      detail([tg, { ...tg, preferred: false }]),
-      "en",
-      "not_attempted",
-    );
+    const text = formatLinksMessage(detail([tg, { ...tg, preferred: false }]), "not_attempted");
     expect(text.match(/t\.me/g)).toHaveLength(1);
     expect(text).not.toContain("Google Drive");
   });

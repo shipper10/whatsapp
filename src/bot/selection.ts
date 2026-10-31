@@ -1,4 +1,4 @@
-import { normalizeText } from "../core/normalize/arabic.js";
+import { normalizeText, toAsciiDigits } from "../core/normalize/text.js";
 import type { IndexEntry, LinkKind } from "../library/indexView.js";
 
 /** What the participant asked for: link numbers, or "sheets 1-5" style typed batches. */
@@ -7,38 +7,28 @@ export type Selection =
   | { kind: "typed"; type: Exclude<LinkKind, "other">; nums: number[] | null };
 
 const MAX_NUMBERS = 200;
-const AR_DIGITS = "٠١٢٣٤٥٦٧٨٩";
 
 const TYPE_WORDS: Record<string, Exclude<LinkKind, "other">> = {
   sheet: "sheet",
   sheets: "sheet",
-  شيت: "sheet",
-  شيتات: "sheet",
-  ورقه: "sheet",
-  اوراق: "sheet",
   lecture: "lecture",
   lectures: "lecture",
   lec: "lecture",
   lecs: "lecture",
-  محاضره: "lecture",
-  محاضرات: "lecture",
   mcq: "mcq",
   mcqs: "mcq",
-  اسئله: "mcq",
-  اسيله: "mcq",
 };
-const ALL_WORDS = new Set(["all", "كل", "جميع", "كامل"]);
+const ALL_WORDS = new Set(["all", "every", "whole", "full"]);
 
-/** "5", "1-5", "1 to 5", "من 1 الى 5", "1,3,5-7", "1 و 3". Returns null when not purely numeric. */
+/** "5", "1-5", "1 to 5", "from 1 to 5", "1,3,5-7", "1 and 3" (Arabic-Indic digits work too). Returns null when not purely numeric. */
 export function parseNumberList(raw: string): number[] | null {
-  const s = raw
-    .replace(/[٠-٩]/g, (d) => String(AR_DIGITS.indexOf(d)))
+  const s = toAsciiDigits(raw)
     .toLowerCase()
-    .replace(/[،؛;]/g, ",")
+    .replace(/[;]/g, ",")
     .replace(/[–—~]/g, "-")
-    .replace(/(^|\s)(من|from)(?=\s|$)/g, " ")
-    .replace(/(^|\s)(الى|إلى|الي|حتى|to|until|till)(?=\s|$)/g, "-")
-    .replace(/(\d)\s*و\s*(?=\d)/g, "$1,")
+    .replace(/(^|\s)from(?=\s|$)/g, " ")
+    .replace(/(^|\s)(to|until|till|through|thru)(?=\s|$)/g, "-")
+    .replace(/(\d)\s+(?:and|&)\s+(?=\d)/g, "$1,")
     .replace(/\s*-\s*/g, "-")
     .trim();
   if (!/^[\d\s,-]+$/.test(s) || !/\d/.test(s)) return null;
@@ -66,8 +56,7 @@ export function parseSelection(raw: string): Selection | null {
     all = true;
     words.shift();
   }
-  const first = words[0]?.replace(/^ال(?=\p{L}{3,})/u, ""); // "الشيتات" -> "شيتات"
-  const type = first ? (TYPE_WORDS[first] ?? TYPE_WORDS[words[0] as string]) : undefined;
+  const type = words[0] ? TYPE_WORDS[words[0]] : undefined;
   if (!type) return null;
   words.shift();
   if (words.length === 0) return all ? { kind: "typed", type, nums: null } : null;
@@ -79,7 +68,7 @@ export function parseSelection(raw: string): Selection | null {
 function rawTail(raw: string): string {
   return raw
     .trim()
-    .replace(/^(كل|جميع|كامل|all)\s+/i, "")
+    .replace(/^(all|every|whole|full)\s+/i, "")
     .replace(/^\S+\s*/, "");
 }
 

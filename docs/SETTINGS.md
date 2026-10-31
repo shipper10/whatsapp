@@ -65,26 +65,11 @@
 | `delivery.sendAttachment` | true / false | `true` | - | لا | Master switch: false = always send links only. |
 | `delivery.tempFileTtlMinutes` | رقم | `30` | `TEMP_FILE_TTL_MINUTES` | لا | Age after which orphaned temp files are removed. |
 
-## text
-
-| المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
-|---|---|---|---|---|---|
-| `text.overrides` | نص | `{}` | - | لا | Your own wording for the bot's built-in messages, as {"key.lang": "text"}. Edit from the admin panel (Texts page); an empty or missing entry means the built-in text. |
-| `text.welcome` | نص | `"أهلاً بك في المكتبة الطبية 📚\nWelcome to the medical library."` | - | لا | Home menu greeting. Editable without redeploy. |
-
-## bot
-
-| المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
-|---|---|---|---|---|---|
-| `bot.userLanguage` | true / false | `true` | `BOT_USER_LANGUAGE` | لا | Let each person pick their language (send 'english' or 'عربي'); false = everyone gets bot.language. |
-| `bot.language` | ar \| en | `"ar"` | `BOT_LANGUAGE` | لا | Language of bot messages. |
-| `bot.maxMessageAgeSeconds` | رقم | `300` | - | لا | Ignore inbound messages older than this (avoids replay after downtime). 0 = no limit. |
-
 ## notify
 
 | المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
 |---|---|---|---|---|---|
-| `notify.enabled` | true / false | `true` | `NOTIFY_ENABLED` | لا | Message subscribers (people who sent 'اشتراك') when new files arrive. Only people who asked for it are messaged. |
+| `notify.enabled` | true / false | `true` | `NOTIFY_ENABLED` | لا | Message subscribers (people who sent 'subscribe') when new files arrive. Only people who asked for it are messaged. |
 | `notify.minIntervalHours` | رقم | `6` | `NOTIFY_MIN_INTERVAL_HOURS` | لا | At most one new-files message per subscriber in this many hours; files arriving in between are bundled into the next one. |
 | `notify.maxRecipients` | رقم | `100` | `NOTIFY_MAX_RECIPIENTS` | لا | Most chats messaged per new-files round (keeps bursts small, lowers the risk of restriction). |
 
@@ -111,7 +96,6 @@
 
 | المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
 |---|---|---|---|---|---|
-| `library.indexAliases` | قائمة | `["الفصل الاول=1st semester","الفصل الثاني=2nd semester","السنة الاو…` | - | لا | Arabic=English word pairs so typing an Arabic subject name reaches its English index title. Edit freely. |
 | `library.rootIndexMessageId` | رقم | `0` | `LIBRARY_ROOT_INDEX_ID` | لا | Telegram message id of the main index shown on the home screen. 0 = detect automatically. |
 
 ## whatsapp
@@ -125,3 +109,15 @@
 | المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
 |---|---|---|---|---|---|
 | `rateLimit.perParticipantPerMinute` | رقم | `20` | - | لا | Max messages handled per participant per minute. |
+
+## bot
+
+| المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
+|---|---|---|---|---|---|
+| `bot.maxMessageAgeSeconds` | رقم | `300` | - | لا | Ignore inbound messages older than this (avoids replay after downtime). 0 = no limit. |
+
+## text
+
+| المفتاح | النوع | الافتراضي | متغير البيئة | يحتاج إعادة تشغيل | الوصف |
+|---|---|---|---|---|---|
+| `text.welcome` | نص | `"Welcome to the medical library 📚"` | - | لا | Home menu greeting. Editable without redeploy. |

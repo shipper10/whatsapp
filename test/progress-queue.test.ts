@@ -90,7 +90,6 @@ describe("WhatsAppProgress", () => {
     const p = new WhatsAppProgress({
       provider: f.provider,
       conversationId: "c",
-      lang: "ar",
       minBytes: 5e6,
     });
     await p.begin(1);
@@ -108,7 +107,7 @@ describe("WhatsAppProgress", () => {
     const p = new WhatsAppProgress({
       provider: f.provider,
       conversationId: "c",
-      lang: "en",
+
       minBytes: 1e6,
       minEditGapMs: 0,
       now: () => (t += 10_000),
@@ -128,7 +127,6 @@ describe("WhatsAppProgress", () => {
     const p = new WhatsAppProgress({
       provider: f.provider,
       conversationId: "c",
-      lang: "ar",
       minBytes: 5e6,
     });
     await p.begin(1);
@@ -148,7 +146,7 @@ describe("upload progress display", () => {
     const p = new WhatsAppProgress({
       provider: f.provider,
       conversationId: "c",
-      lang: "en",
+
       minBytes: 0,
       minEditGapMs: 0,
       now: () => t,

@@ -253,13 +253,6 @@ export const waAuthState = pgTable("wa_auth_state", {
   updatedAt: touched(),
 });
 
-/** Per-person choices (currently the language they chose for replies). Keyed by the person, not the chat. */
-export const userPrefs = pgTable("user_prefs", {
-  participantId: text("participant_id").primaryKey(),
-  lang: text("lang"), // 'ar' | 'en' | null = bot default
-  updatedAt: touched(),
-});
-
 /** Chats (people or groups) that asked to be told when new files arrive. */
 export const subscriptions = pgTable("subscriptions", {
   conversationId: text("conversation_id").primaryKey(),
