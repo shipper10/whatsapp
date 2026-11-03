@@ -1,4 +1,4 @@
-CREATE TABLE "bridge_chats" (
+CREATE TABLE IF NOT EXISTS "bridge_chats" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"platform" text NOT NULL,
 	"chat_id" text NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE "bridge_chats" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "bridge_links" (
+CREATE TABLE IF NOT EXISTS "bridge_links" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"platform" text NOT NULL,
 	"chat_id" text NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE "bridge_links" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "bridge_rules" (
+CREATE TABLE IF NOT EXISTS "bridge_rules" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
@@ -37,6 +37,6 @@ CREATE TABLE "bridge_rules" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX "bridge_chats_uq" ON "bridge_chats" USING btree ("platform","chat_id","topic_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "bridge_links_dst_uq" ON "bridge_links" USING btree ("platform","chat_id","message_id");--> statement-breakpoint
-CREATE INDEX "bridge_links_src_idx" ON "bridge_links" USING btree ("src_platform","src_chat_id","src_message_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "bridge_chats_uq" ON "bridge_chats" USING btree ("platform","chat_id","topic_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "bridge_links_dst_uq" ON "bridge_links" USING btree ("platform","chat_id","message_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "bridge_links_src_idx" ON "bridge_links" USING btree ("src_platform","src_chat_id","src_message_id");

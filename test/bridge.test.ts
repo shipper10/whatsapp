@@ -26,8 +26,10 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   dstChatId: "-100",
   dstTopicId: "7",
   types: [...MESSAGE_TYPES],
-  showSender: true,
+  senderMode: "profile",
+  customName: "",
   showPhone: true,
+  forwardOwn: true,
   ...o,
 });
 
@@ -88,8 +90,39 @@ describe("buildOutgoing", () => {
   it("adds name and phone, and respects the switches", () => {
     expect(buildOutgoing(msg(), rule()).text).toBe("Sara (+249111):\nhello");
     expect(buildOutgoing(msg(), rule({ showPhone: false })).text).toBe("Sara:\nhello");
-    expect(buildOutgoing(msg(), rule({ showSender: false })).text).toBe("hello");
+    expect(buildOutgoing(msg(), rule({ senderMode: "none" })).text).toBe("hello");
     expect(buildOutgoing(msg({ senderPhone: undefined }), rule()).text).toBe("Sara:\nhello");
+  });
+  it("picks the name by sender mode", () => {
+    const m = msg({ senderName: "Sara Profile", savedName: "Sara (Class rep)" });
+    expect(buildOutgoing(m, rule({ senderMode: "profile", showPhone: false })).text).toBe(
+      "Sara Profile:\nhello",
+    );
+    expect(buildOutgoing(m, rule({ senderMode: "saved", showPhone: false })).text).toBe(
+      "Sara (Class rep):\nhello",
+    );
+    expect(
+      buildOutgoing(msg({ savedName: undefined }), rule({ senderMode: "saved", showPhone: false }))
+        .text,
+    ).toBe("Sara:\nhello");
+    expect(
+      buildOutgoing(m, rule({ senderMode: "custom", customName: "Admin", showPhone: false })).text,
+    ).toBe("Admin:\nhello");
+  });
+  it("keeps stickers caption-free", () => {
+    const o = buildOutgoing(
+      msg({ type: "sticker", text: "😀" }),
+      rule({ showPhone: false }),
+      undefined,
+      "/x.webp",
+    );
+    expect(o.type).toBe("sticker");
+    expect(o.text).toBe("Sara:");
+  });
+  it("can skip the account's own messages", () => {
+    expect(matchRules(msg({ fromMe: true }), [rule({ forwardOwn: false })])).toHaveLength(0);
+    expect(matchRules(msg({ fromMe: true }), [rule({ forwardOwn: true })])).toHaveLength(1);
+    expect(matchRules(msg({ fromMe: false }), [rule({ forwardOwn: false })])).toHaveLength(1);
   });
   it("turns contacts and polls into readable text", () => {
     const c = buildOutgoing(
@@ -191,6 +224,63 @@ describe("BridgeService", () => {
     expect(tg.sent[0]?.out.text).toContain("could not be transferred");
   });
 
+  it("sends the sender line separately and falls back to a note when a sticker is refused", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(
+      msg({ type: "sticker", text: "😀", downloadMedia: async () => "/tmp/s.webp" }),
+    );
+    expect(tg.sent.map((x) => x.out.type)).toEqual(["text", "sticker"]);
+    expect(tg.sent[1]?.out.text).toBe("");
+    // a refused sticker still leaves a note
+    const { store: st2, tg: tg2, svc: svc2 } = await setup();
+    await st2.addRule(rule());
+    const origSend = tg2.send.bind(tg2);
+    tg2.send = async (d, o) => {
+      if (o.type === "sticker") throw new Error("bad format");
+      return origSend(d, o);
+    };
+    await svc2.handle(
+      msg({
+        messageId: "s2",
+        type: "sticker",
+        text: "😀",
+        downloadMedia: async () => "/tmp/s.webp",
+      }),
+    );
+    expect(tg2.sent.at(-1)?.out.text).toContain("[sticker 😀]");
+  });
+
+  it("does not try to download animated Telegram stickers for WhatsApp", async () => {
+    const { store, wa, svc } = await setup();
+    await store.addRule(
+      rule({
+        srcPlatform: "telegram",
+        srcChatId: "-100",
+        srcTopicId: "",
+        dstPlatform: "whatsapp",
+        dstChatId: "g1@g.us",
+        dstTopicId: "",
+      }),
+    );
+    let downloaded = false;
+    await svc.handle(
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        type: "sticker",
+        text: "😀",
+        mimeType: "application/x-tgsticker",
+        downloadMedia: async () => {
+          downloaded = true;
+          return "/x";
+        },
+      }),
+    );
+    expect(downloaded).toBe(false);
+    expect(wa.sent[0]?.out.text).toContain("could not be transferred");
+  });
+
   it("retries after a FloodWait and then succeeds", async () => {
     const { store, tg, svc } = await setup();
     await store.addRule(rule());
@@ -237,7 +327,7 @@ describe("bridge dashboard", () => {
     };
     const r = await post(
       "/rules",
-      "src=whatsapp%7Cc%40g.us%7C&dst=telegram%7C-100%7C7&direction=both&types=text&types=image&showSender=1",
+      "src=whatsapp%7Cc%40g.us%7C&dst=telegram%7C-100%7C7&direction=both&types=text&types=image&senderMode=saved&showPhone=1&forwardOwn=1",
     );
     expect(r.redirect).toBe("/admin/panel/bridge");
     const rules = await store.rules();
@@ -248,5 +338,70 @@ describe("bridge dashboard", () => {
     const page = await ui({ method: "GET" } as never, "/", new URL("http://x/"));
     expect(page.body).toContain("Batch 20");
     expect(page.body).toContain("Forum › Notes");
+  });
+
+  it("edits an existing rule, searches and paginates the chat tables", async () => {
+    const db = await createTestDb();
+    const store = new BridgeStore(db);
+    await store.upsertChats([
+      ...Array.from({ length: 40 }, (_, i) => ({
+        platform: "whatsapp" as const,
+        chatId: `g${i}@g.us`,
+        title: `Batch ${i}`,
+        kind: "group",
+      })),
+      { platform: "whatsapp", chatId: "c@g.us", title: "Anatomy Community", kind: "community" },
+      { platform: "telegram", chatId: "-100", title: "Forum", kind: "forum" },
+    ]);
+    const id = await store.addRule(rule({ srcChatId: "g1@g.us", dstTopicId: "" }));
+    const ui = createBridgeUi({
+      store,
+      status: () => ({ whatsapp: true, telegram: true }),
+      refresh: async () => [],
+    });
+    const get = (q: string) => ui({ method: "GET" } as never, "/", new URL(`http://x/?${q}`));
+    const search = await get("qw=anatomy");
+    expect(search.body).toContain("Anatomy Community");
+    expect(search.body).not.toContain("Batch 3<");
+    const p1 = await get("");
+    expect(p1.body).toContain("page 1 / 3");
+    const kind = await get("kw=community");
+    expect(kind.body).not.toContain("Batch 5<");
+    const edit = await get(`edit=${id}`);
+    expect(edit.body).toContain(`Edit rule #${id}`);
+    const post = (sub: string, body: string) => {
+      const req = Object.assign(new Readable({ read() {} }), { method: "POST" });
+      req.push(body);
+      req.push(null);
+      return ui(req as never, sub, new URL("http://x/"));
+    };
+    const r = await post(
+      "/rules",
+      `edit=${id}&src=whatsapp%7Cg1%40g.us%7C&dst=telegram%7C-100%7C&types=text&senderMode=custom&customName=Admin`,
+    );
+    expect(r.redirect).toBe("/admin/panel/bridge");
+    const upd = await store.rule(id);
+    expect(upd?.senderMode).toBe("custom");
+    expect(upd?.customName).toBe("Admin");
+    expect(upd?.forwardOwn).toBe(false);
+    expect(upd?.types).toEqual(["text"]);
+    expect((await store.rules()).length).toBe(1);
+    const bad = await post(
+      "/rules",
+      `src=whatsapp%7Cg1%40g.us%7C&dst=telegram%7C-100%7C&types=text&senderMode=custom`,
+    );
+    expect(bad.code).toBe(400);
+  });
+});
+
+describe("bridge migrations", () => {
+  it("can be run again on a database that already has the tables", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { sql } = await import("drizzle-orm");
+    const db = await createTestDb();
+    for (const f of ["0006_bridge", "0007_bridge_v2"])
+      for (const part of readFileSync(`drizzle/${f}.sql`, "utf8").split("--> statement-breakpoint"))
+        await db.execute(sql.raw(part));
+    expect(await new BridgeStore(db).rules()).toEqual([]);
   });
 });

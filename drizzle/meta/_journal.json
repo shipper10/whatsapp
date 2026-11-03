@@ -50,6 +50,13 @@
       "when": 1793707279092,
       "tag": "0006_bridge",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793709993752,
+      "tag": "0007_bridge_v2",
+      "breakpoints": true
     }
   ]
 }

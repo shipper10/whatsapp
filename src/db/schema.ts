@@ -274,6 +274,11 @@ export const bridgeRules = pgTable("bridge_rules", {
   types: text("types").array().notNull(),
   showSender: boolean("show_sender").notNull().default(true),
   showPhone: boolean("show_phone").notNull().default(true),
+  /** profile | saved | custom | none: which name heads a forwarded message. */
+  senderMode: text("sender_mode").notNull().default("saved"),
+  customName: text("custom_name").notNull().default(""),
+  /** Forward messages written by the linked account itself. */
+  forwardOwn: boolean("forward_own").notNull().default(true),
   createdAt: now(),
 });
 

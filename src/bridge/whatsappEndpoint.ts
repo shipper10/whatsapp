@@ -22,6 +22,8 @@ const MIME_EXT: Record<string, string> = {
   "audio/ogg": "ogg",
   "audio/mpeg": "mp3",
   "audio/mp4": "m4a",
+  "application/x-tgsticker": "tgs",
+  "video/webm": "webm",
   "application/pdf": "pdf",
 };
 export const extFor = (mime?: string, name?: string) =>
@@ -37,6 +39,7 @@ export function whatsappToBridge(
   m: WAMessage,
   titleOf: (jid: string) => string,
   download: (m: WAMessage) => Promise<Buffer>,
+  savedName?: (jids: (string | undefined)[]) => string | undefined,
 ): BridgeMessage | null {
   const key = m.key;
   const chat = key?.remoteJid;
@@ -115,6 +118,13 @@ export function whatsappToBridge(
     chatTitle: titleOf(chat),
     senderId: senderJid ? jidNormalizedUser(senderJid) : "",
     senderName: m.pushName ?? "",
+    savedName: savedName?.([
+      senderJid || undefined,
+      key.participant ?? undefined,
+      key.participantAlt as string | undefined,
+      key.remoteJidAlt as string | undefined,
+      isGroup ? undefined : chat,
+    ]),
     senderPhone: digits(senderJid),
     type,
     text,
@@ -157,6 +167,7 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
       m,
       (jid) => this.titles.get(jid) ?? jid,
       (x) => this.wa.downloadBuffer(x),
+      (jids) => this.wa.savedNameOf(...jids),
     );
     if (msg) void this.onMessage(msg).catch(this.onError);
   };
