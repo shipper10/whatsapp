@@ -281,6 +281,29 @@ describe("BridgeService", () => {
     expect(wa.sent[0]?.out.text).toContain("could not be transferred");
   });
 
+  it("explains why a file did not arrive, in the chat and in the problems list", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    const orig = tg.send.bind(tg);
+    tg.send = async (d, o) => {
+      if (o.filePath) throw new Error("upload exploded");
+      return orig(d, o);
+    };
+    await svc.handle(msg({ type: "image", downloadMedia: async () => "/tmp/p.jpg" }));
+    expect(tg.sent.at(-1)?.out.text).toContain("image could not be sent: upload exploded");
+    await svc.handle(
+      msg({
+        messageId: "m9",
+        type: "video",
+        downloadMedia: async () => Promise.reject(new Error("403 expired")),
+      }),
+    );
+    expect(tg.sent.at(-1)?.out.text).toContain("403 expired");
+    const stages = svc.problems().map((p) => p.stage);
+    expect(stages).toContain("download");
+    expect(stages).toContain("send");
+  });
+
   it("retries after a FloodWait and then succeeds", async () => {
     const { store, tg, svc } = await setup();
     await store.addRule(rule());
