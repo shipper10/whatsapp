@@ -43,6 +43,13 @@
       "when": 1793428746728,
       "tag": "0005_drop_user_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793707279092,
+      "tag": "0006_bridge",
+      "breakpoints": true
     }
   ]
 }
