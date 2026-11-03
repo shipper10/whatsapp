@@ -23,7 +23,10 @@ export interface BridgeMessage {
   messageId: string;
   chatTitle: string;
   senderId: string;
+  /** Name the person chose for their own profile. */
   senderName: string;
+  /** Name saved for them in the linked account's contacts, when known. */
+  savedName?: string;
   /** Digits only; absent when the platform hides it. */
   senderPhone?: string;
   senderUsername?: string;
@@ -89,6 +92,13 @@ export interface BridgeRule {
   dstChatId: string;
   dstTopicId: string;
   types: MessageType[];
-  showSender: boolean;
+  /** profile = their own profile name, saved = name in the account's contacts, custom = customName, none = no header. */
+  senderMode: SenderMode;
+  customName: string;
   showPhone: boolean;
+  /** Also forward messages written by the linked account itself. */
+  forwardOwn: boolean;
 }
+
+export const SENDER_MODES = ["profile", "saved", "custom", "none"] as const;
+export type SenderMode = (typeof SENDER_MODES)[number];

@@ -11,6 +11,7 @@ import type {
   MessageType,
   OutgoingBridge,
 } from "./types.js";
+import { extFor } from "./whatsappEndpoint.js";
 
 export interface TelegramBridgeConfig {
   apiId: number;
@@ -123,18 +124,23 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
       senderName: name,
       senderPhone: sender?.phone ?? undefined,
       senderUsername: sender?.username ?? undefined,
+      savedName: sender?.contact ? name || undefined : undefined,
       type,
-      text: m.message ?? "",
+      text:
+        type === "sticker" &&
+        m.media instanceof Api.MessageMediaDocument &&
+        m.media.document instanceof Api.Document
+          ? (m.media.document.attributes.find(
+              (a): a is Api.DocumentAttributeSticker => a instanceof Api.DocumentAttributeSticker,
+            )?.alt ?? "")
+          : (m.message ?? ""),
       fileName:
         m.media instanceof Api.MessageMediaDocument && m.media.document instanceof Api.Document
           ? m.media.document.attributes.find(
               (a): a is Api.DocumentAttributeFilename => a instanceof Api.DocumentAttributeFilename,
             )?.fileName
           : undefined,
-      mimeType:
-        m.media instanceof Api.MessageMediaDocument && m.media.document instanceof Api.Document
-          ? m.media.document.mimeType
-          : undefined,
+      mimeType: this.mimeOf(m),
       location: geo instanceof Api.GeoPoint ? { lat: geo.lat, lng: geo.long } : undefined,
       contact:
         m.media instanceof Api.MessageMediaContact
@@ -161,12 +167,22 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
         ? undefined
         : async (dir) => {
             await mkdir(dir, { recursive: true });
-            const out = await client.downloadMedia(m, { outputFile: join(dir, `tg-${m.id}`) });
+            const out = await client.downloadMedia(m, {
+              outputFile: join(dir, `tg-${m.id}.${extFor(this.mimeOf(m), undefined)}`),
+            });
             if (typeof out !== "string") throw new Error("download returned no file");
             return out;
           },
     };
     await this.onMessage(msg);
+  }
+
+  private mimeOf(m: Api.Message): string | undefined {
+    return m.media instanceof Api.MessageMediaDocument && m.media.document instanceof Api.Document
+      ? m.media.document.mimeType
+      : m.media instanceof Api.MessageMediaPhoto
+        ? "image/jpeg"
+        : undefined;
   }
 
   async send(dest: Destination, out: OutgoingBridge): Promise<string | undefined> {

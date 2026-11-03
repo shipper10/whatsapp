@@ -2,6 +2,7 @@ import { open, stat } from "node:fs/promises";
 import type {
   AnyMessageContent,
   AuthenticationState,
+  Contact,
   GroupMetadata,
   MiscMessageGenerationOptions,
   WAMessage,
@@ -119,6 +120,7 @@ export class BaileysProvider implements WhatsAppProvider {
   private readonly uploads = new UploadMeter();
   private readonly uploaded = new Map<string, CachedUpload>();
   private lastSendAt = 0;
+  private readonly contacts = new Map<string, { name?: string; notify?: string }>();
   private authClear: (() => Promise<void>) | null = null;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly backoff: (n: number) => number;
@@ -182,10 +184,16 @@ export class BaileysProvider implements WhatsAppProvider {
       }
     }) as never);
 
+    sock.ev.on("contacts.upsert", ((list: Contact[]) => this.noteContacts(list)) as never);
+    sock.ev.on("contacts.update", ((list: Partial<Contact>[]) => this.noteContacts(list)) as never);
+
     sock.ev.on("messages.upsert", ((e: { messages: WAMessage[]; type: string }) => {
-      if (e.type !== "notify") return; // history / appended messages are not requests
-      for (const m of e.messages) {
-        if (this.deps.onRawMessage) {
+      if (this.deps.onRawMessage) {
+        for (const m of e.messages) {
+          // Messages the account itself wrote on its phone often arrive as "append"; old history also does, so only fresh ones.
+          const ts = Number(m.messageTimestamp ?? 0);
+          const fresh = Math.floor(Date.now() / 1000) - ts < 120;
+          if (e.type !== "notify" && !(m.key.fromMe && fresh)) continue;
           this.remember(m);
           try {
             this.deps.onRawMessage(m);
@@ -193,6 +201,9 @@ export class BaileysProvider implements WhatsAppProvider {
             this.deps.logger.error({ err: String(err) }, "bridge tap failed");
           }
         }
+      }
+      if (e.type !== "notify") return; // history / appended messages are not requests
+      for (const m of e.messages) {
         const incoming = extractIncoming(m);
         if (!incoming) continue;
         this.remember(m);
@@ -201,6 +212,25 @@ export class BaileysProvider implements WhatsAppProvider {
           .catch((err) => this.deps.logger.error({ err: String(err) }, "message handler failed"));
       }
     }) as never);
+  }
+
+  private noteContacts(list: Partial<Contact>[]): void {
+    for (const c of list) {
+      const ids = [c.id, c.lid, c.phoneNumber].filter((x): x is string => !!x);
+      for (const id of ids) {
+        const cur = this.contacts.get(id) ?? {};
+        this.contacts.set(id, { name: c.name ?? cur.name, notify: c.notify ?? cur.notify });
+      }
+    }
+  }
+
+  /** Name saved for this person in the linked account's contacts, if WhatsApp told us (best effort, in memory). */
+  savedNameOf(...jids: (string | null | undefined)[]): string | undefined {
+    for (const j of jids) {
+      const n = j ? this.contacts.get(j)?.name : undefined;
+      if (n) return n;
+    }
+    return undefined;
   }
 
   private async onClose(error: unknown): Promise<void> {

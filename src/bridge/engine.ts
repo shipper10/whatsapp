@@ -5,6 +5,7 @@ export function matchRules(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[
   return rules.filter(
     (r) =>
       r.enabled &&
+      (r.forwardOwn || !msg.fromMe) &&
       r.srcPlatform === msg.platform &&
       r.srcChatId === msg.chatId &&
       (r.srcTopicId === "" || r.srcTopicId === (msg.topicId ?? "")) &&
@@ -19,13 +20,19 @@ const TYPE_LABEL: Record<string, string> = {
   location: "📍 Location",
 };
 
-/** "Name (+phone)" header; phone only when the rule asks for it and the platform exposes it. */
+/** "Name (+phone)" header according to the rule's sender mode; the phone only when asked for and exposed. */
 export function senderLabel(
   msg: BridgeMessage,
-  rule: Pick<BridgeRule, "showSender" | "showPhone">,
+  rule: Pick<BridgeRule, "senderMode" | "customName" | "showPhone">,
 ) {
-  if (!rule.showSender) return "";
-  const name = msg.senderName || msg.senderUsername || msg.senderId;
+  if (rule.senderMode === "none") return "";
+  const fallback = msg.senderUsername || msg.senderId;
+  const name =
+    rule.senderMode === "custom" && rule.customName.trim()
+      ? rule.customName.trim()
+      : rule.senderMode === "profile"
+        ? msg.senderName || msg.savedName || fallback
+        : msg.savedName || msg.senderName || fallback;
   const phone =
     rule.showPhone && msg.senderPhone ? ` (+${msg.senderPhone.replace(/\D/g, "")})` : "";
   return `${name}${phone}`;
@@ -72,6 +79,9 @@ export function buildOutgoing(
         ),
         replyToId,
       };
+    case "sticker":
+      // Stickers cannot carry a caption on either platform: the sender goes out as its own line.
+      return { type: "sticker", text: head, filePath, mimeType: msg.mimeType, replyToId };
     default:
       return {
         type: msg.type,

@@ -75,7 +75,10 @@ export class BridgeService {
       `bridge-${msg.platform}-${msg.messageId}`.replace(/[^\w.-]/g, "_"),
     );
     try {
-      if (isMediaType(msg.type) && msg.downloadMedia) {
+      const animatedSticker =
+        msg.type === "sticker" &&
+        ["application/x-tgsticker", "video/webm"].includes(msg.mimeType ?? "");
+      if (isMediaType(msg.type) && msg.downloadMedia && !animatedSticker) {
         try {
           mediaPath = await msg.downloadMedia(dir);
         } catch (err) {
@@ -123,13 +126,31 @@ export class BridgeService {
     let out = buildOutgoing(msg, rule, await this.replyTarget(msg, rule), mediaPath);
     if (mediaWanted && !mediaPath) {
       // Media that could not be fetched still gets announced instead of vanishing.
-      out = { type: "text", text: `${out.text}\n[${msg.type} could not be transferred]`.trim() };
+      const what = msg.type === "sticker" ? `sticker ${msg.text}`.trim() : msg.type;
+      out = { type: "text", text: `${out.text}\n[${what} could not be transferred]`.trim() };
     }
     const dest = { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined };
     const key = `${rule.dstPlatform}:${rule.dstChatId}`;
+    const stickerHead = out.type === "sticker" && out.filePath && out.text ? out.text : "";
+    if (stickerHead) out = { ...out, text: "" };
     this.inflight.set(key, (this.inflight.get(key) ?? 0) + 1);
     try {
-      await this.sendWithRetry(dst, dest, out, msg, rule);
+      if (stickerHead)
+        await this.sendWithRetry(dst, dest, { type: "text", text: stickerHead }, msg, rule);
+      try {
+        await this.sendWithRetry(dst, dest, out, msg, rule);
+      } catch (err) {
+        if (out.type !== "sticker") throw err;
+        // The other platform refused this sticker (format): say so instead of dropping it.
+        this.deps.logger.warn({ err: String(err) }, "bridge: sticker not accepted, sending a note");
+        await this.sendWithRetry(
+          dst,
+          dest,
+          { type: "text", text: `[sticker ${msg.text}]`.trim() },
+          msg,
+          rule,
+        );
+      }
     } finally {
       const n = (this.inflight.get(key) ?? 1) - 1;
       if (n <= 0) this.inflight.delete(key);

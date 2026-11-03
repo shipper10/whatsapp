@@ -7,6 +7,8 @@ import {
   MESSAGE_TYPES,
   type MessageType,
   type Platform,
+  SENDER_MODES,
+  type SenderMode,
 } from "./types.js";
 
 export type NewRule = Omit<BridgeRule, "id">;
@@ -22,8 +24,12 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   dstChatId: r.dstChatId,
   dstTopicId: r.dstTopicId,
   types: r.types.filter((t): t is MessageType => (MESSAGE_TYPES as readonly string[]).includes(t)),
-  showSender: r.showSender,
+  senderMode: (SENDER_MODES as readonly string[]).includes(r.senderMode)
+    ? (r.senderMode as SenderMode)
+    : "saved",
+  customName: r.customName,
   showPhone: r.showPhone,
+  forwardOwn: r.forwardOwn,
 });
 
 export class BridgeStore {
@@ -40,6 +46,15 @@ export class BridgeStore {
       .values(values)
       .returning({ id: bridgeRules.id });
     return (row as { id: number }).id;
+  }
+
+  async updateRule(id: number, r: NewRule) {
+    const { id: _ignored, ...values } = r as NewRule & { id?: number };
+    await this.db.update(bridgeRules).set(values).where(eq(bridgeRules.id, id));
+  }
+
+  async rule(id: number): Promise<BridgeRule | undefined> {
+    return (await this.rules()).find((r) => r.id === id);
   }
 
   async setEnabled(id: number, enabled: boolean) {
