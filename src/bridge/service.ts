@@ -27,6 +27,19 @@ export interface BridgeDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
+export interface BridgeProblem {
+  at: Date;
+  platform: Platform;
+  type: string;
+  stage: "download" | "send";
+  error: string;
+}
+
+const short = (err: unknown) =>
+  String((err as Error)?.message ?? err)
+    .replace(/\s+/g, " ")
+    .slice(0, 200);
+
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const SEEN_MAX = 5000;
 
@@ -44,10 +57,21 @@ export class BridgeService {
   private readonly lanes = new Map<string, Promise<unknown>>();
   /** Sends in progress per destination chat; an own-account event for that chat may be the echo of one. */
   private readonly inflight = new Map<string, number>();
+  private readonly problems_: BridgeProblem[] = [];
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly deps: BridgeDeps) {
     this.sleep = deps.sleep ?? defaultSleep;
+  }
+
+  /** The last few failures, newest first, so the dashboard can show why something did not arrive. */
+  problems(): BridgeProblem[] {
+    return [...this.problems_].reverse();
+  }
+
+  private note(p: BridgeProblem) {
+    this.problems_.push(p);
+    if (this.problems_.length > 30) this.problems_.shift();
   }
 
   /** Entry point for both platforms. Never throws for a single bad message. */
@@ -70,6 +94,7 @@ export class BridgeService {
     if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) return;
 
     let mediaPath: string | undefined;
+    let downloadError: string | undefined;
     const dir = join(
       this.deps.tempDir,
       `bridge-${msg.platform}-${msg.messageId}`.replace(/[^\w.-]/g, "_"),
@@ -82,24 +107,44 @@ export class BridgeService {
         try {
           mediaPath = await msg.downloadMedia(dir);
         } catch (err) {
+          downloadError = short(err);
+          this.note({
+            at: new Date(),
+            platform: msg.platform,
+            type: msg.type,
+            stage: "download",
+            error: downloadError,
+          });
           logger.warn({ err: String(err), type: msg.type }, "bridge: media download failed");
         }
       }
-      await Promise.all(rules.map((r) => this.forward(msg, r, mediaPath)));
+      await Promise.all(rules.map((r) => this.forward(msg, r, mediaPath, downloadError)));
     } finally {
       if (mediaPath) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
-  private forward(msg: BridgeMessage, rule: BridgeRule, mediaPath?: string): Promise<void> {
+  private forward(
+    msg: BridgeMessage,
+    rule: BridgeRule,
+    mediaPath?: string,
+    downloadError?: string,
+  ): Promise<void> {
     const lane = `${rule.dstPlatform}:${rule.dstChatId}:${rule.dstTopicId}`;
     const run = (this.lanes.get(lane) ?? Promise.resolve()).then(() =>
-      this.deliver(msg, rule, mediaPath).catch((err) =>
+      this.deliver(msg, rule, mediaPath, downloadError).catch((err) => {
+        this.note({
+          at: new Date(),
+          platform: rule.dstPlatform,
+          type: msg.type,
+          stage: "send",
+          error: short(err),
+        });
         this.deps.logger.error(
           { err: String(err), rule: rule.id, type: msg.type },
           "bridge: forwarding failed",
-        ),
-      ),
+        );
+      }),
     );
     this.lanes.set(lane, run);
     void run.finally(() => {
@@ -119,7 +164,12 @@ export class BridgeService {
     return orig && orig.chatId === rule.dstChatId ? orig.id : undefined;
   }
 
-  private async deliver(msg: BridgeMessage, rule: BridgeRule, mediaPath?: string) {
+  private async deliver(
+    msg: BridgeMessage,
+    rule: BridgeRule,
+    mediaPath?: string,
+    downloadError?: string,
+  ) {
     const dst = this.deps.endpoints[rule.dstPlatform];
     if (!dst) throw new Error(`${rule.dstPlatform} is not connected`);
     const mediaWanted = isMediaType(msg.type);
@@ -127,7 +177,10 @@ export class BridgeService {
     if (mediaWanted && !mediaPath) {
       // Media that could not be fetched still gets announced instead of vanishing.
       const what = msg.type === "sticker" ? `sticker ${msg.text}`.trim() : msg.type;
-      out = { type: "text", text: `${out.text}\n[${what} could not be transferred]`.trim() };
+      out = {
+        type: "text",
+        text: `${out.text}\n[${what} could not be transferred${downloadError ? `: ${downloadError}` : ""}]`.trim(),
+      };
     }
     const dest = { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined };
     const key = `${rule.dstPlatform}:${rule.dstChatId}`;
@@ -140,16 +193,24 @@ export class BridgeService {
       try {
         await this.sendWithRetry(dst, dest, out, msg, rule);
       } catch (err) {
-        if (out.type !== "sticker") throw err;
-        // The other platform refused this sticker (format): say so instead of dropping it.
-        this.deps.logger.warn({ err: String(err) }, "bridge: sticker not accepted, sending a note");
-        await this.sendWithRetry(
-          dst,
-          dest,
-          { type: "text", text: `[sticker ${msg.text}]`.trim() },
-          msg,
-          rule,
+        if (out.type === "text") throw err;
+        // The destination refused this file: leave a note with the reason instead of dropping it silently.
+        this.note({
+          at: new Date(),
+          platform: rule.dstPlatform,
+          type: out.type,
+          stage: "send",
+          error: short(err),
+        });
+        this.deps.logger.warn(
+          { err: String(err), type: out.type },
+          "bridge: file not accepted, sending a note",
         );
+        const text =
+          out.type === "sticker"
+            ? `[sticker ${msg.text}]`.trim()
+            : `${out.text}\n[${out.type} could not be sent: ${short(err)}]`.trim();
+        await this.sendWithRetry(dst, dest, { type: "text", text }, msg, rule);
       }
     } finally {
       const n = (this.inflight.get(key) ?? 1) - 1;
