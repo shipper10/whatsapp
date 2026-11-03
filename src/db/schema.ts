@@ -259,3 +259,56 @@ export const subscriptions = pgTable("subscriptions", {
   subscribedBy: text("subscribed_by"),
   createdAt: now(),
 });
+
+/** WhatsApp <-> Telegram bridge: one row = one one-way route. "Both ways" is two rows. */
+export const bridgeRules = pgTable("bridge_rules", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  srcPlatform: text("src_platform").notNull(),
+  srcChatId: text("src_chat_id").notNull(),
+  srcTopicId: text("src_topic_id").notNull().default(""),
+  dstPlatform: text("dst_platform").notNull(),
+  dstChatId: text("dst_chat_id").notNull(),
+  dstTopicId: text("dst_topic_id").notNull().default(""),
+  types: text("types").array().notNull(),
+  showSender: boolean("show_sender").notNull().default(true),
+  showPhone: boolean("show_phone").notNull().default(true),
+  createdAt: now(),
+});
+
+/** Chats, communities, channels and topics seen on either side; feeds the two tables of the dashboard. */
+export const bridgeChats = pgTable(
+  "bridge_chats",
+  {
+    id: serial("id").primaryKey(),
+    platform: text("platform").notNull(),
+    chatId: text("chat_id").notNull(),
+    topicId: text("topic_id").notNull().default(""),
+    title: text("title").notNull(),
+    kind: text("kind").notNull(),
+    parentId: text("parent_id"),
+    updatedAt: touched(),
+  },
+  (t) => [uniqueIndex("bridge_chats_uq").on(t.platform, t.chatId, t.topicId)],
+);
+
+/** Every message the bridge produced, with where it came from: loop prevention and reply mapping. */
+export const bridgeLinks = pgTable(
+  "bridge_links",
+  {
+    id: serial("id").primaryKey(),
+    platform: text("platform").notNull(),
+    chatId: text("chat_id").notNull(),
+    messageId: text("message_id").notNull(),
+    srcPlatform: text("src_platform").notNull(),
+    srcChatId: text("src_chat_id").notNull(),
+    srcMessageId: text("src_message_id").notNull(),
+    ruleId: integer("rule_id").notNull(),
+    createdAt: now(),
+  },
+  (t) => [
+    uniqueIndex("bridge_links_dst_uq").on(t.platform, t.chatId, t.messageId),
+    index("bridge_links_src_idx").on(t.srcPlatform, t.srcChatId, t.srcMessageId),
+  ],
+);

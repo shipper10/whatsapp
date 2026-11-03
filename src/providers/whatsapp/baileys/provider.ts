@@ -2,6 +2,7 @@ import { open, stat } from "node:fs/promises";
 import type {
   AnyMessageContent,
   AuthenticationState,
+  GroupMetadata,
   MiscMessageGenerationOptions,
   WAMessage,
 } from "@whiskeysockets/baileys";
@@ -51,6 +52,9 @@ export interface SocketLike {
   ): Promise<WAMessage | undefined>;
   requestPairingCode(phoneNumber: string): Promise<string>;
   end(error: Error | undefined): void;
+  /** Used by the bridge only. */
+  groupFetchAllParticipating?(): Promise<Record<string, GroupMetadata>>;
+  updateMediaMessage?: (msg: WAMessage) => Promise<WAMessage>;
 }
 
 export type LinkState =
@@ -82,6 +86,8 @@ export interface BaileysDeps {
   baileysLogger: unknown;
   onMessage: (id: string, msg: IncomingMessage) => Promise<void>;
   minSendGapMs: () => Promise<number>;
+  /** Bridge tap: every message event (including the account's own), before the bot's own filtering. */
+  onRawMessage?: (m: WAMessage) => void;
   namespace?: string;
   socketFactory?: (auth: AuthenticationState) => Promise<SocketLike>;
   /** Test hooks. */
@@ -179,6 +185,14 @@ export class BaileysProvider implements WhatsAppProvider {
     sock.ev.on("messages.upsert", ((e: { messages: WAMessage[]; type: string }) => {
       if (e.type !== "notify") return; // history / appended messages are not requests
       for (const m of e.messages) {
+        if (this.deps.onRawMessage) {
+          this.remember(m);
+          try {
+            this.deps.onRawMessage(m);
+          } catch (err) {
+            this.deps.logger.error({ err: String(err) }, "bridge tap failed");
+          }
+        }
         const incoming = extractIncoming(m);
         if (!incoming) continue;
         this.remember(m);
@@ -428,6 +442,36 @@ export class BaileysProvider implements WhatsAppProvider {
       this.deps.logger.info({ key: msg.cache.key }, "re-sent a cached upload");
       return { confirmed: true, providerMessageId: res.providerMessageId };
     });
+  }
+
+  /** Bridge: sends any content, paced like every other send. Optionally quotes a message seen recently. */
+  sendBridge(jid: string, content: AnyMessageContent, quoteId?: string): Promise<SendResult> {
+    return this.enqueue(async () => {
+      const { raw: _raw, ...res } = await this.deliver(jid, content, quoteId);
+      return res;
+    });
+  }
+
+  /** Bridge: all groups/communities the account is in. */
+  async groups(): Promise<GroupMetadata[]> {
+    if (!this.sock?.groupFetchAllParticipating || this.status_.state !== "open") return [];
+    return Object.values(await this.sock.groupFetchAllParticipating());
+  }
+
+  /** Bridge: downloads a received media message into memory. */
+  async downloadBuffer(m: WAMessage): Promise<Buffer> {
+    const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
+    const sock = this.sock;
+    return downloadMediaMessage(
+      m,
+      "buffer",
+      {},
+      {
+        logger: this.deps.baileysLogger as never,
+        reuploadRequest: (x: WAMessage) =>
+          sock?.updateMediaMessage?.(x) ?? Promise.reject(new Error("whatsapp not connected")),
+      },
+    );
   }
 
   /** For operators: wipe the stored login so the next start shows a fresh QR. */

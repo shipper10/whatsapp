@@ -1,11 +1,16 @@
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WAMessage } from "@whiskeysockets/baileys";
 import { createAdminHook } from "./admin/commands.js";
 import { adminChats } from "./admin/targets.js";
 import { createHandler } from "./bot/handler.js";
 import { DbPrefs } from "./bot/prefs.js";
 import { ReplyTracker } from "./bot/replyTracker.js";
+import { BridgeService } from "./bridge/service.js";
+import { BridgeStore } from "./bridge/store.js";
+import { TelegramBridgeEndpoint } from "./bridge/telegramEndpoint.js";
+import { WhatsAppBridgeEndpoint } from "./bridge/whatsappEndpoint.js";
 import { loadEnv } from "./config/env.js";
 import { freeDiskMb, rssMb } from "./core/resources.js";
 import { DbSessionStore } from "./core/session/store.js";
@@ -20,6 +25,7 @@ import { materializeGoogleCredentials } from "./drive/credentials.js";
 import { DbDriveStore } from "./drive/store.js";
 import { syncDrive } from "./drive/sync.js";
 import type { DriveClient } from "./drive/types.js";
+import { createBridgeUi } from "./http/bridgePanel.js";
 import { createPanel } from "./http/panel.js";
 import { loadCounts } from "./http/panelData.js";
 import { createAppServer } from "./http/server.js";
@@ -82,6 +88,7 @@ const driveClientFor = (credentialRef: string) => {
 // --- WhatsApp + bot
 // Lite mode: Baileys inside this process, login kept in Postgres. Messages reach the handler via this late-bound hook.
 let onIncoming: (id: string, msg: IncomingMessage) => Promise<void> = async () => undefined;
+let bridgeTap: ((m: WAMessage) => void) | undefined;
 const baileys =
   env.WHATSAPP_PROVIDER === "baileys"
     ? new BaileysProvider({
@@ -89,6 +96,7 @@ const baileys =
         logger: log,
         baileysLogger: createLogger("warn"),
         onMessage: (id, msg) => onIncoming(id, msg),
+        onRawMessage: env.BRIDGE_ENABLED ? (m) => bridgeTap?.(m) : undefined,
         minSendGapMs: () => settings.get("whatsapp.minSendGapMs"),
       })
     : null;
@@ -203,6 +211,46 @@ const handler = createHandler({
 
 onIncoming = (id, msg) => handler.handle(id, msg);
 
+// --- WhatsApp <-> Telegram bridge (off unless BRIDGE_ENABLED=true; never touches the library bot's own flow)
+let bridgeTelegram: TelegramBridgeEndpoint | null = null;
+let bridgeUi: ReturnType<typeof createBridgeUi> | undefined;
+let bridgeRefresh: (() => Promise<unknown>) | undefined;
+if (env.BRIDGE_ENABLED && baileys) {
+  const store = new BridgeStore(db);
+  const endpoints: ConstructorParameters<typeof BridgeService>[0]["endpoints"] = {};
+  const svc = new BridgeService({ store, endpoints, tempDir: env.TEMP_FILE_DIR, logger: log });
+  const wa = new WhatsAppBridgeEndpoint(
+    baileys,
+    (m) => svc.handle(m),
+    (err) => log.error({ err: String(err) }, "bridge: WhatsApp message failed"),
+  );
+  endpoints.whatsapp = wa;
+  bridgeTap = wa.tap;
+  if (env.TELEGRAM_API_ID && env.TELEGRAM_API_HASH && env.BRIDGE_TELEGRAM_SESSION_STRING) {
+    bridgeTelegram = new TelegramBridgeEndpoint(
+      {
+        apiId: env.TELEGRAM_API_ID,
+        apiHash: env.TELEGRAM_API_HASH,
+        sessionString: env.BRIDGE_TELEGRAM_SESSION_STRING,
+      },
+      log,
+      (m) => svc.handle(m),
+    );
+    endpoints.telegram = bridgeTelegram;
+  } else {
+    log.warn(
+      {},
+      "bridge: BRIDGE_TELEGRAM_SESSION_STRING (+ TELEGRAM_API_ID/HASH) missing: Telegram side is off",
+    );
+  }
+  bridgeRefresh = () => svc.refreshChats();
+  bridgeUi = createBridgeUi({
+    store,
+    status: () => ({ whatsapp: wa.ready(), telegram: !!bridgeTelegram?.ready() }),
+    refresh: () => svc.refreshChats(),
+  });
+}
+
 const server = createAppServer({
   webhook: baileys
     ? undefined
@@ -223,6 +271,7 @@ const server = createAppServer({
     ? createPanel({
         token: env.ADMIN_HTTP_TOKEN,
         logger: log,
+        bridge: bridgeUi,
         overview: async () => {
           const st = deliverer.stats();
           const w = baileys?.status();
@@ -271,6 +320,20 @@ if (baileys) {
   await baileys.start();
   log.info({}, "WhatsApp (Baileys) starting; open /admin/link?token=... to link if not linked yet");
 }
+if (bridgeTelegram) {
+  void bridgeTelegram
+    .start()
+    .catch((e) =>
+      log.error({ err: String(e) }, "bridge: Telegram failed to start; the bridge stays one-sided"),
+    );
+}
+let bridgeTimer: NodeJS.Timeout | undefined;
+if (bridgeRefresh) {
+  const refresh = bridgeRefresh;
+  setTimeout(() => void refresh(), 30_000).unref();
+  bridgeTimer = setInterval(() => void refresh(), 30 * 60_000);
+  bridgeTimer.unref();
+}
 if (env.ENABLE_SCHEDULER) scheduler.start();
 const keepAlive = startKeepAlive({
   url: env.KEEPALIVE_URL ?? env.RENDER_EXTERNAL_URL,
@@ -297,11 +360,15 @@ await sweepTempDir(env.TEMP_FILE_DIR, 0).catch(() => undefined); // nothing surv
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     clearInterval(maintenance);
+    if (bridgeTimer) clearInterval(bridgeTimer);
     keepAlive.stop();
     scheduler.stop();
     server.close();
-    void Promise.allSettled([baileys?.stop(), telegram?.close(), pool.end()]).then(() =>
-      process.exit(0),
-    );
+    void Promise.allSettled([
+      baileys?.stop(),
+      telegram?.close(),
+      bridgeTelegram?.stop(),
+      pool.end(),
+    ]).then(() => process.exit(0));
   });
 }

@@ -29,6 +29,12 @@ const baseSchema = z.object({
   TELEGRAM_CHANNEL: z.string().optional(), // username (BahriMed) or numeric id
   TELEGRAM_SESSION_STRING: z.string().optional(),
 
+  // WhatsApp <-> Telegram bridge (needs WHATSAPP_PROVIDER=baileys). Configure rules at /admin/panel/bridge.
+  BRIDGE_ENABLED: bool.default(false),
+  // A DEDICATED Telegram user session for the bridge (npm run telegram:login). Do not reuse TELEGRAM_SESSION_STRING:
+  // the same login on two live connections gets revoked by Telegram (AUTH_KEY_DUPLICATED).
+  BRIDGE_TELEGRAM_SESSION_STRING: z.string().optional(),
+
   // Google Drive. Per-source credentials are referenced by drive_sources.credential_ref.
   GOOGLE_SERVICE_ACCOUNT_JSON_PATH: z.string().optional(),
   // Alternative to the path: the key itself (raw JSON, or base64 of it) - easiest to move between hosts.
@@ -73,6 +79,18 @@ export const envSchema = baseSchema.superRefine((e, ctx) => {
       "ADMIN_HTTP_TOKEN",
       (e.ADMIN_HTTP_TOKEN?.length ?? 0) >= 16,
       "ADMIN_HTTP_TOKEN must be >= 16 chars",
+    );
+  }
+  if (e.BRIDGE_ENABLED) {
+    need(
+      "WHATSAPP_PROVIDER",
+      e.WHATSAPP_PROVIDER === "baileys",
+      "the bridge needs WHATSAPP_PROVIDER=baileys",
+    );
+    need(
+      "ADMIN_HTTP_TOKEN",
+      (e.ADMIN_HTTP_TOKEN?.length ?? 0) >= 16,
+      "the bridge page needs ADMIN_HTTP_TOKEN",
     );
   }
 });
