@@ -279,6 +279,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         editing,
         flash,
         deps.problems?.(),
+        deps.activity?.(),
       ),
     };
   };

@@ -402,6 +402,25 @@ describe("bridge dashboard", () => {
       store,
       status: () => ({ whatsapp: true, telegram: true }),
       refresh: async () => [],
+      activity: () => [
+        {
+          at: new Date(),
+          platform: "whatsapp",
+          chat: "Seen Chat",
+          type: "image",
+          fromMe: false,
+          rules: 1,
+        },
+      ],
+      problems: () => [
+        {
+          at: new Date(),
+          platform: "telegram",
+          type: "image",
+          stage: "send",
+          error: "boom reason",
+        },
+      ],
     });
     const get = (q: string) => ui({ method: "GET" } as never, "/", new URL(`http://x/?${q}`));
     const search = await get("qw=anatomy");
@@ -413,6 +432,8 @@ describe("bridge dashboard", () => {
     expect(kind.body).not.toContain("Batch 5<");
     expect(p1.body).toContain("Recent problems");
     expect(p1.body).toContain("Recent messages seen");
+    expect(p1.body).toContain("Seen Chat");
+    expect(p1.body).toContain("boom reason");
     const edit = await get(`edit=${id}`);
     expect(edit.body).toContain(`Edit rule #${id}`);
     const post = (sub: string, body: string) => {
