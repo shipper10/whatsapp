@@ -13,6 +13,17 @@ import type {
   OutgoingBridge,
 } from "./types.js";
 
+/** Protocol-level content that is never a user message. */
+const IGNORED_KINDS = new Set([
+  "messageContextInfo",
+  "senderKeyDistributionMessage",
+  "protocolMessage",
+  "reactionMessage",
+  "keepInChatMessage",
+  "pollUpdateMessage",
+  "encReactionMessage",
+  "deviceSentMessage",
+]);
 const PN = "@s.whatsapp.net";
 const MIME_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -71,6 +82,10 @@ export function whatsappToBridge(
     text = c.videoMessage.caption ?? "";
     mimeType = c.videoMessage.mimetype;
     ctx = c.videoMessage.contextInfo;
+  } else if (c.ptvMessage) {
+    type = "video";
+    mimeType = c.ptvMessage.mimetype;
+    ctx = c.ptvMessage.contextInfo;
   } else if (c.audioMessage) {
     type = c.audioMessage.ptt ? "voice" : "audio";
     mimeType = c.audioMessage.mimetype;
@@ -92,6 +107,13 @@ export function whatsappToBridge(
       name: c.locationMessage.name ?? undefined,
     };
     text = c.locationMessage.name ?? "";
+  } else if (c.liveLocationMessage) {
+    type = "location";
+    location = {
+      lat: c.liveLocationMessage.degreesLatitude,
+      lng: c.liveLocationMessage.degreesLongitude,
+    };
+    text = c.liveLocationMessage.caption ?? "";
   } else if (c.contactMessage) {
     type = "contact";
     const phone = /waid=(\d+)/.exec(c.contactMessage.vcard ?? "")?.[1];
@@ -159,6 +181,8 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
     private readonly wa: BaileysProvider,
     private readonly onMessage: (m: BridgeMessage) => Promise<void>,
     private readonly onError: (err: unknown) => void,
+    /** Called for messages that carry content the bridge does not recognise (so it is visible, not silent). */
+    private readonly onUnrecognised?: (chat: string, kinds: string[]) => void,
   ) {}
 
   /** Wire this to BaileysDeps.onRawMessage. */
@@ -169,7 +193,15 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
       (x) => this.wa.downloadBuffer(x),
       (jids) => this.wa.savedNameOf(...jids),
     );
-    if (msg) void this.onMessage(msg).catch(this.onError);
+    if (msg) {
+      void this.onMessage(msg).catch(this.onError);
+      return;
+    }
+    const kinds = Object.keys(
+      (normalizeMessageContent(m.message) as object | undefined) ?? {},
+    ).filter((k) => !IGNORED_KINDS.has(k));
+    if (kinds.length && m.key?.remoteJid && !m.key.remoteJid.endsWith("@broadcast"))
+      this.onUnrecognised?.(m.key.remoteJid, kinds);
   };
 
   ready() {
