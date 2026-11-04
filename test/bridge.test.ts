@@ -312,6 +312,19 @@ describe("BridgeService", () => {
     expect(tg.sent.at(-1)?.out.text).toContain("download timed out");
   });
 
+  it("never forwards a bare name header for an empty text message", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(msg({ messageId: "e1", type: "text", text: "  " }));
+    expect(tg.sent).toHaveLength(0);
+  });
+
+  it("lists content it does not recognise", async () => {
+    const { svc } = await setup();
+    svc.noteUnrecognised("whatsapp", "g1@g.us", ["albumMessage"]);
+    expect(svc.activity()[0]?.type).toContain("albumMessage");
+  });
+
   it("retries after a FloodWait and then succeeds", async () => {
     const { store, tg, svc } = await setup();
     await store.addRule(rule());

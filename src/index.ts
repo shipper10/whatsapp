@@ -223,6 +223,7 @@ if (env.BRIDGE_ENABLED && baileys) {
     baileys,
     (m) => svc.handle(m),
     (err) => log.error({ err: String(err) }, "bridge: WhatsApp message failed"),
+    (chat, kinds) => svc.noteUnrecognised("whatsapp", chat, kinds),
   );
   endpoints.whatsapp = wa;
   bridgeTap = wa.tap;

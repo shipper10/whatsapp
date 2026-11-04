@@ -101,6 +101,18 @@ export class BridgeService {
     return [...this.activity_].reverse();
   }
 
+  /** A message arrived that no mapper understands; shown in the dashboard instead of vanishing. */
+  noteUnrecognised(platform: Platform, chat: string, kinds: string[]) {
+    this.seenMsg({
+      at: new Date(),
+      platform,
+      chat,
+      type: `? ${kinds.join(", ")}`,
+      fromMe: false,
+      rules: 0,
+    });
+  }
+
   private seenMsg(a: BridgeActivity) {
     this.activity_.push(a);
     if (this.activity_.length > 30) this.activity_.shift();
@@ -129,6 +141,7 @@ export class BridgeService {
       rules: rules.length,
     });
     if (rules.length === 0) return;
+    if (msg.type === "text" && !msg.text.trim()) return; // nothing to say: never forward a bare name header
 
     // Loop prevention: a message the bridge itself posted must never be forwarded again.
     if (msg.fromMe) {
