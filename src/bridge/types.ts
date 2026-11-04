@@ -17,6 +17,8 @@ export type MessageType = (typeof MESSAGE_TYPES)[number];
 /** A message from either platform in one shape. View-once media is treated like any other media. */
 export interface BridgeMessage {
   platform: Platform;
+  /** Which linked account received it (0 = main). Stamped by the service, not by the platform mappers. */
+  accountId?: number;
   chatId: string;
   /** Telegram forum topic, when the chat has topics. */
   topicId?: string;
@@ -67,6 +69,8 @@ export interface OutgoingBridge {
 
 export interface ChatInfo {
   platform: Platform;
+  /** Account the chat was listed from (0 = main). */
+  accountId?: number;
   chatId: string;
   topicId?: string;
   title: string;
@@ -105,6 +109,9 @@ export interface BridgeRule {
   name: string;
   enabled: boolean;
   srcPlatform: Platform;
+  /** Account the source / destination chat belongs to (0 = main). */
+  srcAccountId: number;
+  dstAccountId: number;
   srcChatId: string;
   /** "" = every topic of the source chat. */
   srcTopicId: string;

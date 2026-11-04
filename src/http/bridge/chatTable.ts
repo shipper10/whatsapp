@@ -20,6 +20,10 @@ function filterChats(all: ChatInfo[], q: string, kind: string) {
  */
 export function chatTable(opts: {
   platform: Platform;
+  /** 0 = main account. */
+  accountId: number;
+  /** Shown after the platform name when the platform has several accounts. */
+  label?: string;
   chats: ChatInfo[];
   connected: boolean;
   /** Path (under the bridge) of the page this table is on. */
@@ -29,7 +33,7 @@ export function chatTable(opts: {
   pick?: { src?: string; dst?: string; link: (side: "src" | "dst", value: string) => string };
 }) {
   const { platform: p, chats, query, path } = opts;
-  const k = p === "whatsapp" ? "w" : "t";
+  const k = `${p === "whatsapp" ? "w" : "t"}${opts.accountId}`;
   const q = query.get(`q${k}`) ?? "";
   const kind = query.get(`k${k}`) ?? "";
   const rows = filterChats(chats, q, kind);
@@ -43,7 +47,7 @@ export function chatTable(opts: {
     .join("");
   const body = shown
     .map((c) => {
-      const r = ref(p, c.chatId, c.topicId);
+      const r = ref(p, c.chatId, c.topicId, opts.accountId);
       const actions = opts.pick
         ? (["src", "dst"] as const)
             .map((side) => {
@@ -56,7 +60,7 @@ export function chatTable(opts: {
     })
     .join("");
   const cols = opts.pick ? 3 : 2;
-  return `<details class="card"${opts.open === false ? "" : " open"} id="${k}"><summary>${LABEL[p]} chats <span class="badge ${opts.connected ? "ok" : "bad"}">${opts.connected ? "connected" : "not connected"}</span><span class="muted">${chats.length} total</span></summary>
+  return `<details class="card"${opts.open === false ? "" : " open"} id="${k}"><summary>${LABEL[p]}${opts.label ? ` · ${esc(opts.label)}` : ""} chats <span class="badge ${opts.connected ? "ok" : "bad"}">${opts.connected ? "connected" : "not connected"}</span><span class="muted">${chats.length} total</span></summary>
 <form method="get" action="${HERE}${path}#${k}" class="row">${hidden}
 <input name="q${k}" value="${esc(q)}" placeholder="Search name or id…">
 <select name="k${k}"><option value="">All types</option>${kinds.map((x) => `<option${x === kind ? " selected" : ""}>${esc(x)}</option>`).join("")}</select>

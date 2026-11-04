@@ -284,6 +284,22 @@ export const bridgeRules = pgTable("bridge_rules", {
   forwardDeletes: boolean("forward_deletes").notNull().default(true),
   /** Keep a per-rule log of what happened to each message. */
   logEnabled: boolean("log_enabled").notNull().default(true),
+  /** Which linked account the chats belong to. 0 = the main account (library bot's WhatsApp / env Telegram session). */
+  srcAccountId: integer("src_account_id").notNull().default(0),
+  dstAccountId: integer("dst_account_id").notNull().default(0),
+  createdAt: now(),
+});
+
+/** Extra WhatsApp / Telegram accounts linked from the dashboard. Telegram sessions are stored encrypted. */
+export const bridgeAccounts = pgTable("bridge_accounts", {
+  id: serial("id").primaryKey(),
+  platform: text("platform").notNull(),
+  label: text("label").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  /** Telegram: encrypted StringSession. WhatsApp keeps its keys in wa_auth_state under its own namespace. */
+  session: text("session"),
+  /** Who is logged in (phone digits / username), shown on the Accounts page. */
+  identity: text("identity"),
   createdAt: now(),
 });
 
@@ -315,9 +331,10 @@ export const bridgeChats = pgTable(
     title: text("title").notNull(),
     kind: text("kind").notNull(),
     parentId: text("parent_id"),
+    accountId: integer("account_id").notNull().default(0),
     updatedAt: touched(),
   },
-  (t) => [uniqueIndex("bridge_chats_uq").on(t.platform, t.chatId, t.topicId)],
+  (t) => [uniqueIndex("bridge_chats_uq2").on(t.accountId, t.platform, t.chatId, t.topicId)],
 );
 
 /** Every message the bridge produced, with where it came from: loop prevention and reply mapping. */

@@ -47,6 +47,8 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   forwardEdits: true,
   forwardDeletes: true,
   logEnabled: true,
+  srcAccountId: 0,
+  dstAccountId: 0,
   ...o,
 });
 
@@ -522,12 +524,12 @@ describe("bridge dashboard", () => {
     });
     const get = (q: string, sub = "/chats") =>
       ui({ method: "GET" } as never, sub, new URL(`http://x/?${q}`));
-    const search = await get("qw=anatomy");
+    const search = await get("qw0=anatomy");
     expect(search.body).toContain("Anatomy Community");
     expect(search.body).not.toContain("Batch 3<");
     const p1 = await get("");
     expect(p1.body).toContain("page 1 / 3");
-    const kind = await get("kw=community");
+    const kind = await get("kw0=community");
     expect(kind.body).not.toContain("Batch 5<");
     const sys = (await get("", "/system")).body;
     expect(sys).toContain("Recent problems");
@@ -566,7 +568,13 @@ describe("bridge migrations", () => {
     const { readFileSync } = await import("node:fs");
     const { sql } = await import("drizzle-orm");
     const db = await createTestDb();
-    for (const f of ["0006_bridge", "0007_bridge_v2", "0008_bridge_queue", "0009_bridge_logs"])
+    for (const f of [
+      "0006_bridge",
+      "0007_bridge_v2",
+      "0008_bridge_queue",
+      "0009_bridge_logs",
+      "0010_bridge_accounts",
+    ])
       for (const part of readFileSync(`drizzle/${f}.sql`, "utf8").split("--> statement-breakpoint"))
         await db.execute(sql.raw(part));
     expect(await new BridgeStore(db).rules()).toEqual([]);

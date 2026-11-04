@@ -34,6 +34,9 @@ const baseSchema = z.object({
   // A DEDICATED Telegram user session for the bridge (npm run telegram:login). Do not reuse TELEGRAM_SESSION_STRING:
   // the same login on two live connections gets revoked by Telegram (AUTH_KEY_DUPLICATED).
   BRIDGE_TELEGRAM_SESSION_STRING: z.string().optional(),
+  // Encrypts the Telegram sessions of extra bridge accounts stored in the database. Defaults to a key derived from
+  // ADMIN_HTTP_TOKEN; set this to keep the sessions readable if you ever rotate the token.
+  BRIDGE_SECRET: z.string().min(16).optional(),
 
   // Google Drive. Per-source credentials are referenced by drive_sources.credential_ref.
   GOOGLE_SERVICE_ACCOUNT_JSON_PATH: z.string().optional(),

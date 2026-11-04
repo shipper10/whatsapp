@@ -34,6 +34,30 @@ type Flash = { text: string; err?: boolean };
 const conn = (name: string, ok: boolean) =>
   `<span class="badge ${ok ? "ok" : "bad"}">${name}: ${ok ? "connected" : "not connected"}</span>`;
 
+/** One collapsible chat table per connected or known account. */
+function accountTables(
+  chats: Chats,
+  path: string,
+  query: URLSearchParams,
+  pick?: Parameters<typeof chatTable>[0]["pick"],
+) {
+  return chats.accounts
+    .map((a) => {
+      const several = chats.accounts.filter((x) => x.platform === a.platform).length > 1;
+      return chatTable({
+        platform: a.platform,
+        accountId: a.id,
+        label: several ? a.label : undefined,
+        chats: chats.chats.filter((c) => (c.accountId ?? 0) === a.id && c.platform === a.platform),
+        connected: a.connected,
+        path,
+        query,
+        pick,
+      });
+    })
+    .join("");
+}
+
 // ---- Rules overview
 
 export async function rulesView(
@@ -44,11 +68,10 @@ export async function rulesView(
   flash?: Flash,
 ) {
   const rules = await store.rules();
-  const all = [...chats.whatsapp, ...chats.telegram];
   const cards = await Promise.all(
     rules.map(async (r) => {
       const sum = await store.logSummary(r.id);
-      const route = ruleRoute(r, all);
+      const route = ruleRoute(r, chats);
       return `<div class="card rule"><div class="main">
 <div>${r.enabled ? '<span class="badge ok">active</span>' : '<span class="badge off">paused</span>'}</div>
 <div class="route">${esc(route.from)}<br>→ ${esc(route.to)}</div>
@@ -85,13 +108,12 @@ export function builderView(
   b: BuilderState,
   flash?: Flash,
 ) {
-  const all = [...chats.whatsapp, ...chats.telegram];
   const editing = b.edit;
   const path = editing ? `/rules/${editing.id}/edit` : "/new";
   const label = (v: string | undefined) => {
     const r = parseRef(v);
     return r
-      ? esc(endpointLabel(all, r))
+      ? esc(endpointLabel(chats, r))
       : '<span class="muted">not chosen yet — press “From” / “To” in a table below</span>';
   };
   const link = (side: "src" | "dst", value: string) => {
@@ -116,9 +138,7 @@ export function builderView(
       `<label style="margin-inline-end:.8rem;white-space:nowrap"><input type="checkbox" name="types" value="${t}"${o.types.includes(t) ? " checked" : ""} style="width:auto"> ${t}</label>`,
   ).join("");
   const pick = { src: b.src, dst: b.dst, link };
-  const tables = (["whatsapp", "telegram"] as const)
-    .map((p) => chatTable({ platform: p, chats: chats[p], connected: st[p], path, query, pick }))
-    .join("");
+  const tables = accountTables(chats, path, query, pick);
   return bridgePage(
     editing ? "rules" : "new",
     editing ? `Edit rule #${editing.id}` : "New rule",
@@ -163,8 +183,7 @@ export async function ruleView(
   query: URLSearchParams,
   flash?: Flash,
 ) {
-  const all = [...chats.whatsapp, ...chats.telegram];
-  const route = ruleRoute(rule, all);
+  const route = ruleRoute(rule, chats);
   const f = FILTERS.some(([k]) => k === query.get("f")) ? (query.get("f") as LogFilter) : "all";
   const total = await store.logCount(rule.id, f);
   const pages = Math.max(1, Math.ceil(total / LOG_PAGE));
@@ -232,7 +251,7 @@ export function chatsView(chats: Chats, st: Status, query: URLSearchParams, flas
     "Chats",
     `<div class="card row" style="justify-content:space-between"><span class="muted">The lists refresh by themselves every 30 minutes.</span>
 <form class="inline" method="post" action="${HERE}/refresh"><button>Refresh chat lists</button></form></div>
-${(["whatsapp", "telegram"] as const).map((p) => chatTable({ platform: p, chats: chats[p], connected: st[p], path: "/chats", query })).join("")}`,
+${accountTables(chats, "/chats", query)}`,
     flash,
   );
 }

@@ -20,7 +20,11 @@ interface Logger {
 
 export interface BridgeDeps {
   store: BridgeStore;
-  endpoints: Partial<Record<Platform, BridgeEndpoint>>;
+  /**
+   * Connected accounts. The main account of a platform is stored under "whatsapp" / "telegram";
+   * extra accounts under "whatsapp:<id>" / "telegram:<id>". The map is live: accounts come and go at runtime.
+   */
+  endpoints: Record<string, BridgeEndpoint | undefined>;
   tempDir: string;
   logger: Logger;
   /** Own-account messages arrive as events slightly before we have recorded the send; wait before judging them. */
@@ -76,6 +80,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const SEEN_MAX = 5000;
+
+/** Key of an account's endpoint in the registry (the main account keeps the plain platform name). */
+export const endpointKey = (platform: Platform, accountId = 0) =>
+  accountId === 0 ? platform : `${platform}:${accountId}`;
 const LOG_KEEP = 500;
 
 /** Telegram tells clients to back off with a FloodWait; everything else gets a short exponential retry. */
@@ -184,7 +192,7 @@ export class BridgeService {
   /** Entry point for both platforms. Never throws for a single bad message. */
   async handle(msg: BridgeMessage): Promise<void> {
     const { store, logger } = this.deps;
-    const first = `${msg.platform}:${msg.chatId}:${msg.messageId}`;
+    const first = `${msg.platform}:${msg.accountId ?? 0}:${msg.chatId}:${msg.messageId}`;
     if (this.seen.has(first)) return; // redelivered event
     this.seen.add(first);
     if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.values().next().value as string);
@@ -238,8 +246,16 @@ export class BridgeService {
     if (this.deps.inline) await this.processDue();
   }
 
-  private liveKey = (m: { platform: Platform; chatId: string; messageId: string }) =>
-    `${m.platform}:${m.chatId}:${m.messageId}`;
+  private liveKey = (m: {
+    platform: Platform;
+    accountId?: number;
+    chatId: string;
+    messageId: string;
+  }) => `${m.platform}:${m.accountId ?? 0}:${m.chatId}:${m.messageId}`;
+
+  private endpoint(platform: Platform, accountId = 0): BridgeEndpoint | undefined {
+    return this.deps.endpoints[endpointKey(platform, accountId)];
+  }
 
   private async enqueueSend(msg: BridgeMessage, rules: BridgeRule[]) {
     this.live.set(this.liveKey(msg), msg);
@@ -252,6 +268,7 @@ export class BridgeService {
         dedupeKey: `s:${r.id}:${msg.platform}:${msg.chatId}:${msg.messageId}`,
         payload: {
           platform: msg.platform,
+          accountId: msg.accountId ?? 0,
           chatId: msg.chatId,
           messageId: msg.messageId,
           ref: msg.ref ?? null,
@@ -264,7 +281,7 @@ export class BridgeService {
   // ---- albums: members arrive as separate messages; wait briefly, then forward them together
 
   private bufferAlbum(msg: BridgeMessage, rules: BridgeRule[]) {
-    const key = `${msg.platform}:${msg.chatId}:${msg.albumId}`;
+    const key = `${msg.platform}:${msg.accountId ?? 0}:${msg.chatId}:${msg.albumId}`;
     const cur = this.albums.get(key) ?? { msgs: [], rules };
     cur.msgs.push(msg);
     cur.rules = rules;
@@ -301,6 +318,7 @@ export class BridgeService {
         payload: {
           members: msgs.map((m) => ({
             platform: m.platform,
+            accountId: m.accountId ?? 0,
             chatId: m.chatId,
             messageId: m.messageId,
             ref: m.ref ?? null,
@@ -352,12 +370,14 @@ export class BridgeService {
     platform: Platform,
     chatId: string | undefined,
     messageId: string,
+    accountId = 0,
   ): Promise<void> {
     const { store } = this.deps;
     const rules = (await store.rules()).filter(
       (r) =>
         r.forwardDeletes &&
         r.srcPlatform === platform &&
+        r.srcAccountId === accountId &&
         (chatId === undefined || r.srcChatId === chatId),
     );
     if (rules.length === 0) return;
@@ -427,7 +447,9 @@ export class BridgeService {
     const lanes = new Map<string, JobRow[]>();
     for (const j of jobs) {
       const r = rules.get(j.ruleId);
-      const lane = r ? `${r.dstPlatform}:${r.dstChatId}:${r.dstTopicId}` : "orphan";
+      const lane = r
+        ? `${r.dstPlatform}:${r.dstAccountId}:${r.dstChatId}:${r.dstTopicId}`
+        : "orphan";
       lanes.set(lane, [...(lanes.get(lane) ?? []), j]);
     }
     await Promise.all(
@@ -491,19 +513,21 @@ export class BridgeService {
 
   private async messageFor(m: {
     platform: Platform;
+    accountId?: number;
     chatId: string;
     messageId: string;
     ref?: unknown;
   }): Promise<BridgeMessage | null> {
     const hit = this.live.get(this.liveKey(m));
     if (hit) return hit;
-    const ep = this.deps.endpoints[m.platform];
+    const ep = this.endpoint(m.platform, m.accountId);
     return m.ref ? ((await ep?.rehydrate?.(m.ref)) ?? null) : null;
   }
 
   private async runSend(job: JobRow, rule: BridgeRule) {
     const p = job.payload as {
       platform: Platform;
+      accountId?: number;
       chatId: string;
       messageId: string;
       ref?: unknown;
@@ -577,7 +601,7 @@ export class BridgeService {
       type: OutgoingBridge["type"];
       text: string;
     };
-    const dst = this.deps.endpoints[rule.dstPlatform];
+    const dst = this.endpoint(rule.dstPlatform, rule.dstAccountId);
     if (!dst?.edit) return;
     const copy = await this.deps.store.copyOf(
       p.srcPlatform,
@@ -608,7 +632,7 @@ export class BridgeService {
 
   private async runDelete(job: JobRow, rule: BridgeRule) {
     const p = job.payload as { srcPlatform: Platform; srcChatId: string; srcMessageId: string };
-    const dst = this.deps.endpoints[rule.dstPlatform];
+    const dst = this.endpoint(rule.dstPlatform, rule.dstAccountId);
     if (!dst?.remove) return;
     const copy = await this.deps.store.copyOf(
       p.srcPlatform,
@@ -625,7 +649,13 @@ export class BridgeService {
   private async runAlbum(job: JobRow, rule: BridgeRule) {
     const refs = (
       job.payload as {
-        members: { platform: Platform; chatId: string; messageId: string; ref?: unknown }[];
+        members: {
+          platform: Platform;
+          accountId?: number;
+          chatId: string;
+          messageId: string;
+          ref?: unknown;
+        }[];
       }
     ).members;
     const msgs: BridgeMessage[] = [];
@@ -634,7 +664,7 @@ export class BridgeService {
       if (m) msgs.push(m);
     }
     if (msgs.length === 0) return;
-    const dst = this.deps.endpoints[rule.dstPlatform];
+    const dst = this.endpoint(rule.dstPlatform, rule.dstAccountId);
     if (!dst) throw new Error(`${rule.dstPlatform} is not connected`);
     const fetched = [];
     for (const m of msgs) fetched.push({ m, ...(await this.fetchMedia(m)) });
@@ -736,7 +766,7 @@ export class BridgeService {
     mediaPath?: string,
     downloadError?: string,
   ) {
-    const dst = this.deps.endpoints[rule.dstPlatform];
+    const dst = this.endpoint(rule.dstPlatform, rule.dstAccountId);
     if (!dst) throw new Error(`${rule.dstPlatform} is not connected`);
     const mediaWanted = isMediaType(msg.type);
     let out = buildOutgoing(msg, rule, await this.replyTarget(msg, rule), mediaPath);
@@ -872,22 +902,32 @@ export class BridgeService {
     }
   }
 
-  /** Refreshes the two chat tables from whichever platforms are connected. */
-  async refreshChats(): Promise<{ platform: Platform; count: number }[]> {
-    const res: { platform: Platform; count: number }[] = [];
-    for (const ep of Object.values(this.deps.endpoints)) {
+  /** Refreshes the chat tables from every connected account. */
+  async refreshChats(): Promise<{ platform: Platform; accountId: number; count: number }[]> {
+    const res: { platform: Platform; accountId: number; count: number }[] = [];
+    for (const [key, ep] of Object.entries(this.deps.endpoints)) {
       if (!ep?.ready()) continue;
+      const accountId = Number(key.split(":")[1] ?? 0);
       try {
         const chats = await ep.listChats();
-        await this.deps.store.upsertChats(chats);
-        res.push({ platform: ep.platform, count: chats.length });
+        await this.deps.store.upsertChats(chats.map((c) => ({ ...c, accountId })));
+        res.push({ platform: ep.platform, accountId, count: chats.length });
       } catch (err) {
         this.deps.logger.warn(
-          { err: String(err), platform: ep.platform },
+          { err: String(err), platform: ep.platform, accountId },
           "bridge: chat refresh failed",
         );
       }
     }
     return res;
+  }
+
+  /** Chat list of one account (after it was added or re-linked). */
+  async refreshAccount(platform: Platform, accountId: number) {
+    const ep = this.endpoint(platform, accountId);
+    if (!ep?.ready()) return 0;
+    const chats = await ep.listChats();
+    await this.deps.store.upsertChats(chats.map((c) => ({ ...c, accountId })));
+    return chats.length;
   }
 }

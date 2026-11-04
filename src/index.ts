@@ -7,6 +7,7 @@ import { adminChats } from "./admin/targets.js";
 import { createHandler } from "./bot/handler.js";
 import { DbPrefs } from "./bot/prefs.js";
 import { ReplyTracker } from "./bot/replyTracker.js";
+import { AccountManager, defaultFactories } from "./bridge/accounts.js";
 import { BridgeService } from "./bridge/service.js";
 import { BridgeStore } from "./bridge/store.js";
 import { TelegramBridgeEndpoint } from "./bridge/telegramEndpoint.js";
@@ -218,6 +219,7 @@ let bridgeTelegram: TelegramBridgeEndpoint | null = null;
 let bridgeUi: ReturnType<typeof createBridgeUi> | undefined;
 let bridgeRefresh: (() => Promise<unknown>) | undefined;
 let bridgeService: BridgeService | undefined;
+let bridgeAccounts: AccountManager | undefined;
 if (env.BRIDGE_ENABLED && baileys) {
   const store = new BridgeStore(db);
   const endpoints: ConstructorParameters<typeof BridgeService>[0]["endpoints"] = {};
@@ -257,10 +259,33 @@ if (env.BRIDGE_ENABLED && baileys) {
       "bridge: BRIDGE_TELEGRAM_SESSION_STRING (+ TELEGRAM_API_ID/HASH) missing: Telegram side is off",
     );
   }
+  // Extra accounts linked from the dashboard. Their sessions live in the database; the library bot never sees them.
+  bridgeAccounts = new AccountManager({
+    db,
+    bridgeStore: store,
+    svc,
+    endpoints,
+    logger: log,
+    factories: defaultFactories({
+      db,
+      logger: log,
+      baileysLogger: createLogger("warn"),
+      apiId: env.TELEGRAM_API_ID ?? 0,
+      apiHash: env.TELEGRAM_API_HASH ?? "",
+    }),
+    secret: env.BRIDGE_SECRET ?? (env.ADMIN_HTTP_TOKEN as string),
+    telegramAvailable: !!(env.TELEGRAM_API_ID && env.TELEGRAM_API_HASH),
+    mainWhatsAppPhone: () => baileys.status().me?.split(":")[0]?.split("@")[0],
+  });
   bridgeRefresh = () => svc.refreshChats();
   bridgeUi = createBridgeUi({
     store,
-    status: () => ({ whatsapp: wa.ready(), telegram: !!bridgeTelegram?.ready() }),
+    status: () => ({
+      whatsapp: wa.ready(),
+      telegram: !!bridgeTelegram?.ready(),
+      telegramConfigured: !!bridgeTelegram,
+    }),
+    accounts: bridgeAccounts,
     refresh: () => svc.refreshChats(),
     problems: () => svc.problems(),
     activity: () => svc.activity(),
@@ -343,6 +368,11 @@ if (bridgeService) {
     .start()
     .catch((e) => log.error({ err: String(e) }, "bridge: queue worker failed to start"));
 }
+if (bridgeAccounts) {
+  void bridgeAccounts
+    .startAll()
+    .catch((e) => log.error({ err: String(e) }, "bridge: extra accounts failed to start"));
+}
 if (bridgeTelegram) {
   void bridgeTelegram
     .start()
@@ -392,6 +422,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
       baileys?.stop(),
       telegram?.close(),
       bridgeTelegram?.stop(),
+      bridgeAccounts?.stopAll(),
       pool.end(),
     ]).then(() => process.exit(0));
   });

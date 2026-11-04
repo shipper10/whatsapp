@@ -7,6 +7,7 @@ export function matchRules(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[
       r.enabled &&
       (r.forwardOwn || !msg.fromMe) &&
       r.srcPlatform === msg.platform &&
+      (r.srcAccountId ?? 0) === (msg.accountId ?? 0) &&
       r.srcChatId === msg.chatId &&
       (r.srcTopicId === "" || r.srcTopicId === (msg.topicId ?? "")) &&
       r.types.includes(msg.type),
@@ -19,6 +20,7 @@ export function rulesForChat(msg: BridgeMessage, rules: BridgeRule[]): BridgeRul
     (r) =>
       r.enabled &&
       r.srcPlatform === msg.platform &&
+      (r.srcAccountId ?? 0) === (msg.accountId ?? 0) &&
       r.srcChatId === msg.chatId &&
       (r.srcTopicId === "" || r.srcTopicId === (msg.topicId ?? "")),
   );

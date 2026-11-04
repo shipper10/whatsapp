@@ -44,6 +44,8 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   forwardEdits: r.forwardEdits,
   forwardDeletes: r.forwardDeletes,
   logEnabled: r.logEnabled,
+  srcAccountId: r.srcAccountId,
+  dstAccountId: r.dstAccountId,
 });
 
 export class BridgeStore {
@@ -80,11 +82,49 @@ export class BridgeStore {
     await this.db.delete(bridgeLogs).where(eq(bridgeLogs.ruleId, id));
   }
 
+  /** An account was removed: its chats leave the tables and the rules that used it stop (they are kept, not deleted). */
+  async forgetAccount(platform: Platform, accountId: number): Promise<number> {
+    await this.db
+      .delete(bridgeChats)
+      .where(and(eq(bridgeChats.platform, platform), eq(bridgeChats.accountId, accountId)));
+    const used = (await this.rules()).filter(
+      (r) =>
+        r.enabled &&
+        ((r.srcPlatform === platform && r.srcAccountId === accountId) ||
+          (r.dstPlatform === platform && r.dstAccountId === accountId)),
+    );
+    for (const r of used) await this.setEnabled(r.id, false);
+    return used.length;
+  }
+
+  /** Rules that read from or write to this account. */
+  async rulesOfAccount(platform: Platform, accountId: number): Promise<BridgeRule[]> {
+    return (await this.rules()).filter(
+      (r) =>
+        (r.srcPlatform === platform && r.srcAccountId === accountId) ||
+        (r.dstPlatform === platform && r.dstAccountId === accountId),
+    );
+  }
+
   async setLogEnabled(id: number, logEnabled: boolean) {
     await this.db.update(bridgeRules).set({ logEnabled }).where(eq(bridgeRules.id, id));
   }
 
   // ---- per-rule log
+
+  /** Chats of every account. */
+  async allChats(): Promise<ChatInfo[]> {
+    const rows = await this.db.select().from(bridgeChats).orderBy(asc(bridgeChats.title));
+    return rows.map((r) => ({
+      platform: r.platform as Platform,
+      accountId: r.accountId,
+      chatId: r.chatId,
+      topicId: r.topicId || undefined,
+      title: r.title,
+      kind: r.kind,
+      parentId: r.parentId ?? undefined,
+    }));
+  }
 
   async addLog(e: {
     ruleId: number;
@@ -168,12 +208,18 @@ export class BridgeStore {
           platform: c.platform,
           chatId: c.chatId,
           topicId: c.topicId ?? "",
+          accountId: c.accountId ?? 0,
           title: c.title,
           kind: c.kind,
           parentId: c.parentId ?? null,
         })
         .onConflictDoUpdate({
-          target: [bridgeChats.platform, bridgeChats.chatId, bridgeChats.topicId],
+          target: [
+            bridgeChats.accountId,
+            bridgeChats.platform,
+            bridgeChats.chatId,
+            bridgeChats.topicId,
+          ],
           set: {
             title: c.title,
             kind: c.kind,
@@ -184,14 +230,15 @@ export class BridgeStore {
     }
   }
 
-  async chats(platform: Platform): Promise<ChatInfo[]> {
+  async chats(platform: Platform, accountId = 0): Promise<ChatInfo[]> {
     const rows = await this.db
       .select()
       .from(bridgeChats)
-      .where(eq(bridgeChats.platform, platform))
+      .where(and(eq(bridgeChats.platform, platform), eq(bridgeChats.accountId, accountId)))
       .orderBy(asc(bridgeChats.title));
     return rows.map((r) => ({
       platform,
+      accountId: r.accountId,
       chatId: r.chatId,
       topicId: r.topicId || undefined,
       title: r.title,

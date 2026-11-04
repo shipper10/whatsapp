@@ -1,4 +1,6 @@
 import type { IncomingMessage as HttpReq } from "node:http";
+import QRCode from "qrcode";
+import type { AccountManager } from "../bridge/accounts.js";
 import type { BridgeStore, NewRule } from "../bridge/store.js";
 import {
   MESSAGE_TYPES,
@@ -7,7 +9,15 @@ import {
   SENDER_MODES,
   type SenderMode,
 } from "../bridge/types.js";
-import { findChat, parseRef, type Ref } from "./bridge/shared.js";
+import { accountConfirmView, accountsView, accountView } from "./bridge/accountsView.js";
+import {
+  type AccountInfo,
+  type Chats,
+  findChat,
+  parseRef,
+  type Ref,
+  ref,
+} from "./bridge/shared.js";
 import {
   builderView,
   chatsView,
@@ -20,12 +30,15 @@ import {
 import { readBody } from "./server.js";
 import { BASE } from "./ui.js";
 
-export { ref } from "./bridge/shared.js";
+export { ref };
 
 export interface BridgeUiDeps {
   store: BridgeStore;
-  status: () => { whatsapp: boolean; telegram: boolean };
+  /** Connection of the two main accounts; `telegramConfigured` is false when no main Telegram session is set. */
+  status: () => { whatsapp: boolean; telegram: boolean; telegramConfigured?: boolean };
   refresh: () => Promise<{ platform: Platform; count: number }[]>;
+  /** Extra accounts (Accounts tab). Absent = only the main accounts exist. */
+  accounts?: AccountManager;
   /** Latest messages the bridge saw, even ones no rule forwarded (newest first). */
   activity?: () => SystemData["activity"];
   queue?: () => Promise<{ pending: number; running: number; failed: number }>;
@@ -51,10 +64,20 @@ const NOT_FOUND = { code: 404, body: "Not found" };
  */
 export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
   const { store } = deps;
-  const chats = async () => ({
-    whatsapp: await store.chats("whatsapp"),
-    telegram: await store.chats("telegram"),
-  });
+  const chats = async (): Promise<Chats> => {
+    const st = deps.status();
+    const accounts: AccountInfo[] = [
+      { platform: "whatsapp", id: 0, label: "Main", connected: st.whatsapp },
+      { platform: "telegram", id: 0, label: "Main", connected: st.telegram },
+      ...(deps.accounts ? await deps.accounts.views() : []).map((v) => ({
+        platform: v.row.platform,
+        id: v.row.id,
+        label: v.row.label,
+        connected: v.state === "connected",
+      })),
+    ];
+    return { chats: await store.allChats(), accounts };
+  };
   const queueStats = () => (deps.queue ? deps.queue() : Promise.resolve(undefined));
   type Flash = { text: string; err?: boolean };
 
@@ -79,6 +102,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         ),
       };
     }
+    if (sub === "/accounts" || sub.startsWith("/accounts/")) return accountsPage(sub, q, flash);
     if (sub === "/new")
       return {
         body: builderView(
@@ -94,8 +118,10 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
     const rule = await store.rule(Number(m[1]));
     if (!rule) return NOT_FOUND;
     if (m[2] === "edit") {
-      const src = q.get("src") || `${rule.srcPlatform}|${rule.srcChatId}|${rule.srcTopicId}`;
-      const dst = q.get("dst") || `${rule.dstPlatform}|${rule.dstChatId}|${rule.dstTopicId}`;
+      const src =
+        q.get("src") || ref(rule.srcPlatform, rule.srcChatId, rule.srcTopicId, rule.srcAccountId);
+      const dst =
+        q.get("dst") || ref(rule.dstPlatform, rule.dstChatId, rule.dstTopicId, rule.dstAccountId);
       return {
         body: builderView(await chats(), deps.status(), q, { src, dst, edit: rule }, flash),
       };
@@ -107,6 +133,113 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         : NOT_FOUND;
     }
     return { body: await ruleView(store, rule, await chats(), q, flash) };
+  };
+
+  const accountsPage = async (
+    sub: string,
+    q: URLSearchParams,
+    flash?: Flash,
+  ): Promise<BridgeUiResult> => {
+    const mgr = deps.accounts;
+    if (!mgr) return NOT_FOUND;
+    if (sub === "/accounts") {
+      const st = deps.status();
+      return {
+        body: accountsView(
+          await mgr.views(),
+          {
+            whatsapp: { present: true, connected: st.whatsapp },
+            telegram: { present: st.telegramConfigured ?? true, connected: st.telegram },
+          },
+          mgr.telegramAvailable,
+          flash,
+        ),
+      };
+    }
+    const m = /^\/accounts\/(\d+)(?:\/(confirm))?$/.exec(sub);
+    if (!m) return NOT_FOUND;
+    const v = await mgr.view(Number(m[1]));
+    if (!v) return NOT_FOUND;
+    const using = (await store.rulesOfAccount(v.row.platform, v.row.id)).length;
+    if (m[2]) return { body: accountConfirmView(v, using) };
+    const qr = v.qr
+      ? String(await QRCode.toString(v.qr, { type: "svg", margin: 1, width: 280 }))
+      : undefined;
+    void q;
+    return { body: accountView(v, qr, using, flash) };
+  };
+
+  const accountAction = async (sub: string, req: HttpReq): Promise<BridgeUiResult | undefined> => {
+    const mgr = deps.accounts;
+    if (!mgr) return NOT_FOUND;
+    const form = new URLSearchParams((await readBody(req)) ?? "");
+    if (sub === "/accounts/add-whatsapp" || sub === "/accounts/add-telegram") {
+      const platform = sub.endsWith("whatsapp") ? "whatsapp" : "telegram";
+      if (platform === "telegram" && !mgr.telegramAvailable)
+        return {
+          ...(await accountsPage("/accounts", new URLSearchParams(), {
+            text: "Telegram API credentials are not set.",
+            err: true,
+          })),
+          code: 400,
+        };
+      const id = await mgr.create(platform, form.get("label") ?? "");
+      return { redirect: `${here}/accounts/${id}` };
+    }
+    const m = /^\/accounts\/(\d+)\/(rename|toggle|remove|pair|tg-phone|tg-code|tg-session)$/.exec(
+      sub,
+    );
+    if (!m) return NOT_FOUND;
+    const id = Number(m[1]);
+    const row = await mgr.accounts.get(id);
+    if (!row) return NOT_FOUND;
+    const back = `${here}/accounts/${id}`;
+    const again = async (text: string, err = false): Promise<BridgeUiResult> => ({
+      ...(await accountsPage(`/accounts/${id}`, new URLSearchParams(), { text, err })),
+      code: err ? 400 : 200,
+    });
+    try {
+      switch (m[2]) {
+        case "rename":
+          await mgr.rename(id, form.get("label") ?? "");
+          break;
+        case "toggle":
+          await mgr.setEnabled(id, !row.enabled);
+          if (form.get("next") === "list") return { redirect: `${here}/accounts` };
+          break;
+        case "remove": {
+          const paused = await mgr.remove(id);
+          void paused;
+          return { redirect: `${here}/accounts` };
+        }
+        case "pair": {
+          const code = await mgr.pairingCode(id, form.get("phone") ?? "");
+          return again(
+            `Pairing code: ${code} — type it on the phone (Linked devices → Link with phone number).`,
+          );
+        }
+        case "tg-phone": {
+          const phone = (form.get("phone") ?? "").replace(/[^\d+]/g, "");
+          if (phone.replace(/\D/g, "").length < 7)
+            return again("Enter the phone number with its country code.", true);
+          await mgr.telegramBegin(id, phone.startsWith("+") ? phone : `+${phone}`);
+          break;
+        }
+        case "tg-code":
+          if (!mgr.telegramAnswer(id, form.get("value") ?? ""))
+            return again(
+              "There is no login waiting for a code. Start again with the phone number.",
+              true,
+            );
+          break;
+        case "tg-session":
+          await mgr.telegramImport(id, form.get("value") ?? "");
+          break;
+      }
+    } catch (err) {
+      return again(String((err as Error).message ?? err).slice(0, 200), true);
+    }
+    return { redirect: back };
   };
 
   const saveRule = async (form: URLSearchParams): Promise<BridgeUiResult> => {
@@ -136,7 +269,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
     if (senderMode === "custom" && !customName)
       return again("Type the fixed name, or pick another sender option.");
 
-    const all = [...(await store.chats(src.platform)), ...(await store.chats(dst.platform))];
+    const all = await store.allChats();
     const title = (x: Ref) => findChat(all, x)?.title ?? x.chatId;
     const base = {
       enabled: true,
@@ -153,6 +286,8 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
       ...base,
       name: `${title(a)} → ${title(b)}`,
       srcPlatform: a.platform,
+      srcAccountId: a.accountId,
+      dstAccountId: b.accountId,
       srcChatId: a.chatId,
       srcTopicId: a.topicId,
       dstPlatform: b.platform,
@@ -187,6 +322,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         code: flash.err ? 400 : 200,
       };
     }
+    if (sub.startsWith("/accounts/")) return accountAction(sub, req) as Promise<BridgeUiResult>;
     if (sub === "/rules") return saveRule(new URLSearchParams((await readBody(req)) ?? ""));
 
     const m = /^\/rules\/(\d+)\/(toggle|delete|log-toggle|log-clear)$/.exec(sub);
