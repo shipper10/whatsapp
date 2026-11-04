@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
-import { bridgeChats, bridgeJobs, bridgeLinks, bridgeRules } from "../db/schema.js";
+import { bridgeChats, bridgeJobs, bridgeLinks, bridgeLogs, bridgeRules } from "../db/schema.js";
 import {
   type BridgeRule,
   type ChatInfo,
@@ -12,6 +12,17 @@ import {
 } from "./types.js";
 
 export type NewRule = Omit<BridgeRule, "id">;
+export type LogLevel = "ok" | "skip" | "warn" | "error";
+export type LogFilter = "all" | "done" | "skip" | "problems";
+
+function logWhere(ruleId: number, filter: LogFilter = "all") {
+  const rule = eq(bridgeLogs.ruleId, ruleId);
+  if (filter === "done")
+    return and(rule, eq(bridgeLogs.level, "ok"), ne(bridgeLogs.event, "queued"));
+  if (filter === "skip") return and(rule, eq(bridgeLogs.level, "skip"));
+  if (filter === "problems") return and(rule, inArray(bridgeLogs.level, ["warn", "error"]));
+  return rule;
+}
 
 const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   id: r.id,
@@ -32,6 +43,7 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   forwardOwn: r.forwardOwn,
   forwardEdits: r.forwardEdits,
   forwardDeletes: r.forwardDeletes,
+  logEnabled: r.logEnabled,
 });
 
 export class BridgeStore {
@@ -65,6 +77,87 @@ export class BridgeStore {
 
   async deleteRule(id: number) {
     await this.db.delete(bridgeRules).where(eq(bridgeRules.id, id));
+    await this.db.delete(bridgeLogs).where(eq(bridgeLogs.ruleId, id));
+  }
+
+  async setLogEnabled(id: number, logEnabled: boolean) {
+    await this.db.update(bridgeRules).set({ logEnabled }).where(eq(bridgeRules.id, id));
+  }
+
+  // ---- per-rule log
+
+  async addLog(e: {
+    ruleId: number;
+    level: LogLevel;
+    event: string;
+    msgType?: string;
+    detail?: string;
+  }) {
+    await this.db.insert(bridgeLogs).values({
+      ruleId: e.ruleId,
+      level: e.level,
+      event: e.event,
+      msgType: e.msgType ?? "",
+      detail: (e.detail ?? "").slice(0, 400),
+    });
+  }
+
+  /** Newest first. `level` filters one level; `errors` shows warnings and errors together. */
+  async logs(ruleId: number, o: { filter?: LogFilter; limit: number; offset: number }) {
+    return this.db
+      .select()
+      .from(bridgeLogs)
+      .where(logWhere(ruleId, o.filter))
+      .orderBy(desc(bridgeLogs.id))
+      .limit(o.limit)
+      .offset(o.offset);
+  }
+
+  async logCount(ruleId: number, filter?: LogFilter): Promise<number> {
+    const [r] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(bridgeLogs)
+      .where(logWhere(ruleId, filter));
+    return r?.n ?? 0;
+  }
+
+  /** What happened in the last day: finished, skipped on purpose, and problems. */
+  async logSummary(ruleId: number): Promise<{ done: number; skipped: number; problems: number }> {
+    const rows = await this.db
+      .select({ level: bridgeLogs.level, event: bridgeLogs.event, n: sql<number>`count(*)::int` })
+      .from(bridgeLogs)
+      .where(
+        and(eq(bridgeLogs.ruleId, ruleId), gte(bridgeLogs.at, new Date(Date.now() - 86_400_000))),
+      )
+      .groupBy(bridgeLogs.level, bridgeLogs.event);
+    const out = { done: 0, skipped: 0, problems: 0 };
+    for (const r of rows) {
+      if (r.level === "skip") out.skipped += r.n;
+      else if (r.level === "warn" || r.level === "error") out.problems += r.n;
+      else if (r.event !== "queued") out.done += r.n;
+    }
+    return out;
+  }
+
+  async clearLogs(ruleId: number) {
+    await this.db.delete(bridgeLogs).where(eq(bridgeLogs.ruleId, ruleId));
+  }
+
+  /** Keeps only the newest `keep` rows of a rule's log. */
+  async trimLogs(ruleId: number, keep: number) {
+    await this.db.execute(
+      sql`DELETE FROM bridge_logs WHERE rule_id = ${ruleId} AND id < COALESCE((SELECT id FROM bridge_logs WHERE rule_id = ${ruleId} ORDER BY id DESC OFFSET ${keep - 1} LIMIT 1), 0)`,
+    );
+  }
+
+  /** Failed and giving-up entries of every rule, for the overview. */
+  async recentErrors(limit: number) {
+    return this.db
+      .select()
+      .from(bridgeLogs)
+      .where(eq(bridgeLogs.level, "error"))
+      .orderBy(desc(bridgeLogs.id))
+      .limit(limit);
   }
 
   async upsertChats(chats: ChatInfo[]) {

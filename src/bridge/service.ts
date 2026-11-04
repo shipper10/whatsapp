@@ -1,8 +1,8 @@
 import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { stickerToPng } from "./convert.js";
-import { buildOutgoing, isMediaType, matchRules } from "./engine.js";
-import type { BridgeStore, JobRow } from "./store.js";
+import { buildOutgoing, isMediaType, matchRules, rulesForChat, skipReason } from "./engine.js";
+import type { BridgeStore, JobRow, LogLevel } from "./store.js";
 import type {
   AlbumItem,
   BridgeEndpoint,
@@ -76,6 +76,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const SEEN_MAX = 5000;
+const LOG_KEEP = 500;
 
 /** Telegram tells clients to back off with a FloodWait; everything else gets a short exponential retry. */
 function retryDelayMs(err: unknown, attempt: number): number | null {
@@ -154,6 +155,27 @@ export class BridgeService {
     if (this.activity_.length > 30) this.activity_.shift();
   }
 
+  private logCount = new Map<number, number>();
+
+  /** Writes one line to the rule's own log (when the rule keeps one). Logging never breaks forwarding. */
+  private async log(
+    rule: Pick<BridgeRule, "id" | "logEnabled">,
+    level: LogLevel,
+    event: string,
+    msgType = "",
+    detail = "",
+  ) {
+    if (!rule.logEnabled) return;
+    try {
+      await this.deps.store.addLog({ ruleId: rule.id, level, event, msgType, detail });
+      const n = (this.logCount.get(rule.id) ?? 0) + 1;
+      this.logCount.set(rule.id, n);
+      if (n % 50 === 0) await this.deps.store.trimLogs(rule.id, LOG_KEEP);
+    } catch (err) {
+      this.deps.logger.warn({ err: String(err) }, "bridge: could not write log line");
+    }
+  }
+
   private note(p: BridgeProblem) {
     this.problems_.push(p);
     if (this.problems_.length > 30) this.problems_.shift();
@@ -179,8 +201,16 @@ export class BridgeService {
       fromMe: msg.fromMe,
       rules: rules.length,
     });
+    for (const r of rulesForChat(msg, allRules)) {
+      const why = skipReason(msg, r);
+      if (why) await this.log(r, "skip", "skipped", msg.type, why);
+    }
     if (rules.length === 0) return;
-    if (msg.type === "text" && !msg.text.trim()) return; // nothing to say: never forward a bare name header
+    if (msg.type === "text" && !msg.text.trim()) {
+      // nothing to say: never forward a bare name header
+      for (const r of rules) await this.log(r, "skip", "skipped", msg.type, "empty text message");
+      return;
+    }
 
     // Loop prevention: a message the bridge itself posted must never be forwarded again.
     if (msg.fromMe) {
@@ -188,7 +218,17 @@ export class BridgeService {
       for (let i = 0; i < 240 && (this.inflight.get(`${msg.platform}:${msg.chatId}`) ?? 0) > 0; i++)
         await this.sleep(500); // a large upload can finish long after its echo arrived
     }
-    if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) return;
+    if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) {
+      for (const r of rules)
+        await this.log(
+          r,
+          "skip",
+          "skipped",
+          msg.type,
+          "copy made by the bridge itself (loop guard)",
+        );
+      return;
+    }
 
     if (msg.albumId && (msg.type === "image" || msg.type === "video")) {
       this.bufferAlbum(msg, rules);
@@ -204,7 +244,8 @@ export class BridgeService {
   private async enqueueSend(msg: BridgeMessage, rules: BridgeRule[]) {
     this.live.set(this.liveKey(msg), msg);
     if (this.live.size > 500) this.live.delete(this.live.keys().next().value as string);
-    for (const r of rules)
+    for (const r of rules) {
+      await this.log(r, "ok", "queued", msg.type, `from ${msg.senderName || msg.senderId || "?"}`);
       await this.deps.store.enqueue({
         kind: "send",
         ruleId: r.id,
@@ -216,6 +257,7 @@ export class BridgeService {
           ref: msg.ref ?? null,
         },
       });
+    }
     this.kick();
   }
 
@@ -250,7 +292,8 @@ export class BridgeService {
     if (msgs.length === 1) return this.enqueueSend(msgs[0] as BridgeMessage, a.rules);
     for (const m of msgs) this.live.set(this.liveKey(m), m);
     const first = msgs[0] as BridgeMessage;
-    for (const r of a.rules)
+    for (const r of a.rules) {
+      await this.log(r, "ok", "queued", "album", `${msgs.length} items`);
       await this.deps.store.enqueue({
         kind: "album",
         ruleId: r.id,
@@ -264,6 +307,7 @@ export class BridgeService {
           })),
         },
       });
+    }
     this.kick();
   }
 
@@ -285,6 +329,7 @@ export class BridgeService {
     });
     for (const r of rules) {
       const out = buildOutgoing(msg, r);
+      await this.log(r, "ok", "queued", "edit", "source message was edited");
       await store.enqueue({
         kind: "edit",
         ruleId: r.id,
@@ -324,6 +369,7 @@ export class BridgeService {
       // Without a chat id, only act when a copy exists; otherwise the id may belong to an unrelated chat.
       if (chatId === undefined && !known.some((c) => c.ruleId === r.id)) continue;
       n++;
+      await this.log(r, "ok", "queued", "delete", "source message was deleted");
       await store.enqueue({
         kind: "delete",
         ruleId: r.id,
@@ -407,6 +453,14 @@ export class BridgeService {
         ? [5_000, 10_000, 20_000, 40_000]
         : [5_000, 30_000, 120_000, 600_000, 1_800_000];
       const giveUp = job.attempts + 1 >= max;
+      if (rule)
+        await this.log(
+          rule,
+          giveUp && !quick ? "error" : "warn",
+          giveUp ? (quick ? "dropped" : "failed") : "retry",
+          job.kind,
+          `${short(err)}${giveUp ? "" : ` (attempt ${job.attempts + 1}/${max})`}`,
+        );
       this.note({
         at: new Date(),
         platform: rule?.dstPlatform ?? "telegram",
@@ -463,12 +517,20 @@ export class BridgeService {
         stage: "download",
         error: "original message is no longer available",
       });
+      await this.log(rule, "error", "failed", "send", "original message is no longer available");
       return;
     }
     const { mediaPath, downloadError, dir } = await this.fetchMedia(msg);
     try {
       await this.deliver(msg, rule, mediaPath, downloadError);
       this.forget(msg); // kept after a failure so the retry does not need to rebuild it
+      await this.log(
+        rule,
+        downloadError ? "warn" : "ok",
+        "sent",
+        msg.type,
+        downloadError ? `sent without the file: ${downloadError}` : `to ${rule.dstPlatform}`,
+      );
     } finally {
       if (mediaPath) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -526,7 +588,7 @@ export class BridgeService {
     if (!copy) throw new Error("the copy does not exist yet");
     const dest = { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined };
     const ok = await dst.edit(dest, copy, { type: p.type, text: p.text });
-    if (!ok)
+    if (!ok) {
       this.note({
         at: new Date(),
         platform: rule.dstPlatform,
@@ -534,6 +596,14 @@ export class BridgeService {
         stage: "send",
         error: `${rule.dstPlatform} cannot edit this kind of message`,
       });
+      await this.log(
+        rule,
+        "warn",
+        "edit",
+        p.type,
+        `${rule.dstPlatform} cannot edit this kind of message`,
+      );
+    } else await this.log(rule, "ok", "edit", p.type, "copy updated");
   }
 
   private async runDelete(job: JobRow, rule: BridgeRule) {
@@ -548,6 +618,7 @@ export class BridgeService {
     );
     if (!copy) throw new Error("the copy does not exist yet");
     await dst.remove({ chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined }, copy);
+    await this.log(rule, "ok", "delete", "", "copy deleted");
   }
 
   /** Forwards an album as one album where the destination supports it, otherwise one by one. */
@@ -608,6 +679,7 @@ export class BridgeService {
               });
           }
           for (const f of fetched) this.forget(f.m);
+          await this.log(rule, "ok", "sent", "album", `${msgs.length} items as one album`);
           return;
         } catch (err) {
           this.note({
@@ -617,6 +689,13 @@ export class BridgeService {
             stage: "send",
             error: short(err),
           });
+          await this.log(
+            rule,
+            "warn",
+            "album",
+            "album",
+            `album refused, sending one by one: ${short(err)}`,
+          );
         }
       }
       // One by one: the name goes on the first picture only.
@@ -630,6 +709,7 @@ export class BridgeService {
         );
       }
       for (const f of fetched) this.forget(f.m);
+      await this.log(rule, "ok", "sent", "album", `${msgs.length} items one by one`);
     } finally {
       const n = (this.inflight.get(key) ?? 1) - 1;
       if (n <= 0) this.inflight.delete(key);
@@ -745,6 +825,7 @@ export class BridgeService {
         return;
       } catch (err) {
         first ??= err;
+        await this.log(rule, "warn", "fallback", out.type, `${short(err)} — trying another form`);
         this.note({
           at: new Date(),
           platform: rule.dstPlatform,

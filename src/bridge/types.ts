@@ -121,6 +121,8 @@ export interface BridgeRule {
   /** Mirror edits and deletions of the source message onto its copy. */
   forwardEdits: boolean;
   forwardDeletes: boolean;
+  /** Keep a per-rule log of what happened to each message. */
+  logEnabled: boolean;
 }
 
 export const SENDER_MODES = ["profile", "saved", "custom", "none"] as const;

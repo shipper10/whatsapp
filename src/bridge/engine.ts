@@ -13,6 +13,25 @@ export function matchRules(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[
   );
 }
 
+/** Enabled rules whose source chat/topic is this message's chat, whatever their filters say. */
+export function rulesForChat(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[] {
+  return rules.filter(
+    (r) =>
+      r.enabled &&
+      r.srcPlatform === msg.platform &&
+      r.srcChatId === msg.chatId &&
+      (r.srcTopicId === "" || r.srcTopicId === (msg.topicId ?? "")),
+  );
+}
+
+/** Why a rule on this chat does not forward the message (undefined when it does). */
+export function skipReason(msg: BridgeMessage, rule: BridgeRule): string | undefined {
+  if (!rule.forwardOwn && msg.fromMe)
+    return "message written by my own account (turned off in this rule)";
+  if (!rule.types.includes(msg.type)) return `type "${msg.type}" is not selected in this rule`;
+  return undefined;
+}
+
 const TYPE_LABEL: Record<string, string> = {
   contact: "👤 Contact",
   poll: "📊 Poll",

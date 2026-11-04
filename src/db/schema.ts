@@ -282,8 +282,27 @@ export const bridgeRules = pgTable("bridge_rules", {
   /** Mirror edits / deletions of the source message onto its copy. */
   forwardEdits: boolean("forward_edits").notNull().default(true),
   forwardDeletes: boolean("forward_deletes").notNull().default(true),
+  /** Keep a per-rule log of what happened to each message. */
+  logEnabled: boolean("log_enabled").notNull().default(true),
   createdAt: now(),
 });
+
+/** Per-rule activity log shown on the rule's page. Trimmed automatically; can be cleared or switched off per rule. */
+export const bridgeLogs = pgTable(
+  "bridge_logs",
+  {
+    id: serial("id").primaryKey(),
+    ruleId: integer("rule_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    /** ok | skip | warn | error */
+    level: text("level").notNull(),
+    /** received | skipped | sent | retry | failed | edit | delete | album */
+    event: text("event").notNull(),
+    msgType: text("msg_type").notNull().default(""),
+    detail: text("detail").notNull().default(""),
+  },
+  (t) => [index("bridge_logs_rule_idx").on(t.ruleId, t.id)],
+);
 
 /** Chats, communities, channels and topics seen on either side; feeds the two tables of the dashboard. */
 export const bridgeChats = pgTable(

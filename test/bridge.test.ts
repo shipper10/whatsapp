@@ -46,6 +46,7 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   forwardOwn: true,
   forwardEdits: true,
   forwardDeletes: true,
+  logEnabled: true,
   ...o,
 });
 
@@ -470,7 +471,7 @@ describe("bridge dashboard", () => {
       "/rules",
       "src=whatsapp%7Cc%40g.us%7C&dst=telegram%7C-100%7C7&direction=both&types=text&types=image&senderMode=saved&showPhone=1&forwardOwn=1",
     );
-    expect(r.redirect).toBe("/admin/panel/bridge");
+    expect(r.redirect).toMatch(/^\/admin\/panel\/bridge\/rules\/\d+$/);
     const rules = await store.rules();
     expect(rules).toHaveLength(2);
     expect(rules[0]?.dstTopicId).toBe("7");
@@ -519,7 +520,8 @@ describe("bridge dashboard", () => {
         },
       ],
     });
-    const get = (q: string) => ui({ method: "GET" } as never, "/", new URL(`http://x/?${q}`));
+    const get = (q: string, sub = "/chats") =>
+      ui({ method: "GET" } as never, sub, new URL(`http://x/?${q}`));
     const search = await get("qw=anatomy");
     expect(search.body).toContain("Anatomy Community");
     expect(search.body).not.toContain("Batch 3<");
@@ -527,11 +529,12 @@ describe("bridge dashboard", () => {
     expect(p1.body).toContain("page 1 / 3");
     const kind = await get("kw=community");
     expect(kind.body).not.toContain("Batch 5<");
-    expect(p1.body).toContain("Recent problems");
-    expect(p1.body).toContain("Recent messages seen");
-    expect(p1.body).toContain("Seen Chat");
-    expect(p1.body).toContain("boom reason");
-    const edit = await get(`edit=${id}`);
+    const sys = (await get("", "/system")).body;
+    expect(sys).toContain("Recent problems");
+    expect(sys).toContain("Recent messages seen");
+    expect(sys).toContain("Seen Chat");
+    expect(sys).toContain("boom reason");
+    const edit = await get("", `/rules/${id}/edit`);
     expect(edit.body).toContain(`Edit rule #${id}`);
     const post = (sub: string, body: string) => {
       const req = Object.assign(new Readable({ read() {} }), { method: "POST" });
@@ -543,7 +546,7 @@ describe("bridge dashboard", () => {
       "/rules",
       `edit=${id}&src=whatsapp%7Cg1%40g.us%7C&dst=telegram%7C-100%7C&types=text&senderMode=custom&customName=Admin`,
     );
-    expect(r.redirect).toBe("/admin/panel/bridge");
+    expect(r.redirect).toBe(`/admin/panel/bridge/rules/${id}`);
     const upd = await store.rule(id);
     expect(upd?.senderMode).toBe("custom");
     expect(upd?.customName).toBe("Admin");
@@ -563,7 +566,7 @@ describe("bridge migrations", () => {
     const { readFileSync } = await import("node:fs");
     const { sql } = await import("drizzle-orm");
     const db = await createTestDb();
-    for (const f of ["0006_bridge", "0007_bridge_v2", "0008_bridge_queue"])
+    for (const f of ["0006_bridge", "0007_bridge_v2", "0008_bridge_queue", "0009_bridge_logs"])
       for (const part of readFileSync(`drizzle/${f}.sql`, "utf8").split("--> statement-breakpoint"))
         await db.execute(sql.raw(part));
     expect(await new BridgeStore(db).rules()).toEqual([]);
@@ -721,5 +724,108 @@ describe("albums", () => {
     await svc.flushAlbums();
     expect(tg.sent).toHaveLength(2);
     expect(svc.problems().some((p) => p.type === "album")).toBe(true);
+  });
+});
+
+describe("per-rule log", () => {
+  const lines = async (
+    store: BridgeStore,
+    id: number,
+    filter?: "all" | "done" | "skip" | "problems",
+  ) => store.logs(id, { filter, limit: 50, offset: 0 });
+
+  it("records what happened to each message, separately for each rule", async () => {
+    const { store, tg, svc } = await setup();
+    const a = await store.addRule(rule({ types: ["text"] }));
+    const b = await store.addRule(rule({ types: ["text", "image"], dstChatId: "-200" }));
+    await svc.handle(msg());
+    await svc.handle(msg({ messageId: "m2", type: "image" }));
+    expect(tg.sent).toHaveLength(3);
+    const logA = await lines(store, a);
+    expect(logA.map((l) => `${l.event}:${l.level}`)).toEqual(
+      expect.arrayContaining(["queued:ok", "sent:ok", "skipped:skip"]),
+    );
+    expect(logA.find((l) => l.event === "skipped")?.detail).toContain('type "image"');
+    // rule B takes images, so it has no skip line
+    expect((await lines(store, b, "skip")).length).toBe(0);
+    expect((await lines(store, b, "done")).length).toBe(2);
+    expect(await store.logSummary(a)).toEqual({ done: 1, skipped: 1, problems: 0 });
+  });
+
+  it("logs failures with the reason, and the final give-up as an error", async () => {
+    const { store, tg, svc } = await setup();
+    const id = await store.addRule(rule());
+    tg.failures.push(new Error("down"), new Error("down"), new Error("down"), new Error("down"));
+    await svc.handle(msg());
+    const problems = await lines(store, id, "problems");
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0]?.detail).toContain("down");
+    expect(problems[0]?.level).toBe("warn");
+  });
+
+  it("can be stopped per rule and cleared", async () => {
+    const { store, svc } = await setup();
+    const id = await store.addRule(rule({ logEnabled: false }));
+    await svc.handle(msg());
+    expect(await store.logCount(id)).toBe(0);
+    await store.setLogEnabled(id, true);
+    await svc.handle(msg({ messageId: "m2" }));
+    expect(await store.logCount(id)).toBeGreaterThan(0);
+    await store.clearLogs(id);
+    expect(await store.logCount(id)).toBe(0);
+  });
+
+  it("keeps only the newest lines and removes them with the rule", async () => {
+    const { store } = await setup();
+    const id = await store.addRule(rule());
+    for (let i = 0; i < 30; i++)
+      await store.addLog({ ruleId: id, level: "ok", event: "sent", detail: `n${i}` });
+    await store.trimLogs(id, 10);
+    const left = await store.logs(id, { limit: 50, offset: 0 });
+    expect(left).toHaveLength(10);
+    expect(left[0]?.detail).toBe("n29");
+    await store.deleteRule(id);
+    expect(await store.logCount(id)).toBe(0);
+  });
+
+  it("is shown on the rule page with filters, and the stop/clear buttons work", async () => {
+    const { store, svc } = await setup();
+    const id = await store.addRule(rule({ types: ["text"] }));
+    await svc.handle(msg());
+    await svc.handle(msg({ messageId: "m2", type: "image" }));
+    const ui = createBridgeUi({
+      store,
+      status: () => ({ whatsapp: true, telegram: true }),
+      refresh: async () => [],
+    });
+    const get = (sub: string, q = "") =>
+      ui({ method: "GET" } as never, sub, new URL(`http://x/?${q}`));
+    const all = await get(`/rules/${id}`);
+    expect(all.body).toContain("is not selected in this rule");
+    expect(all.body).toContain("recording");
+    const skipped = await get(`/rules/${id}`, "f=skip");
+    expect(skipped.body).toContain("is not selected");
+    const done = await get(`/rules/${id}`, "f=done");
+    expect(done.body).not.toContain("is not selected");
+    expect((await get("/")).body).toContain("1 done");
+    expect((await get(`/rules/${id}/confirm`, "do=log-clear")).body).toContain("Clear");
+    expect((await get("/rules/999")).code).toBe(404);
+
+    const post = (sub: string, body = "") => {
+      const req = Object.assign(new Readable({ read() {} }), { method: "POST" });
+      req.push(body);
+      req.push(null);
+      return ui(req as never, sub, new URL("http://x/"));
+    };
+    await post(`/rules/${id}/log-toggle`);
+    expect((await store.rule(id))?.logEnabled).toBe(false);
+    expect((await get(`/rules/${id}`)).body).toContain("Logging is stopped");
+    await post(`/rules/${id}/log-clear`);
+    expect(await store.logCount(id)).toBe(0);
+    const t = await post(`/rules/${id}/toggle`, "next=list");
+    expect(t.redirect).toBe("/admin/panel/bridge");
+    expect((await store.rule(id))?.enabled).toBe(false);
+    await post(`/rules/${id}/delete`);
+    expect(await store.rules()).toEqual([]);
   });
 });
