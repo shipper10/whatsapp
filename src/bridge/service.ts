@@ -2,8 +2,9 @@ import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { stickerToPng } from "./convert.js";
 import { buildOutgoing, isMediaType, matchRules } from "./engine.js";
-import type { BridgeStore } from "./store.js";
+import type { BridgeStore, JobRow } from "./store.js";
 import type {
+  AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
   BridgeRule,
@@ -28,6 +29,12 @@ export interface BridgeDeps {
   downloadTimeoutMs?: number;
   uploadTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Process jobs right inside handle() (tests). Production runs the worker loop instead. */
+  inline?: boolean;
+  /** How long to wait for the rest of an album before sending it. */
+  albumWaitMs?: number;
+  /** Worker poll interval. */
+  pollMs?: number;
 }
 
 export interface BridgeProblem {
@@ -87,9 +94,35 @@ export class BridgeService {
   private readonly problems_: BridgeProblem[] = [];
   private readonly activity_: BridgeActivity[] = [];
   private readonly sleep: (ms: number) => Promise<void>;
+  /** Messages still in memory for queued jobs (avoids rebuilding them; after a restart they are rehydrated). */
+  private readonly live = new Map<string, BridgeMessage>();
+  private readonly albums = new Map<
+    string,
+    { msgs: BridgeMessage[]; rules: BridgeRule[]; timer?: NodeJS.Timeout }
+  >();
+  private timer?: NodeJS.Timeout;
+  private ticking = false;
+  private lastPurge = 0;
 
   constructor(private readonly deps: BridgeDeps) {
     this.sleep = deps.sleep ?? defaultSleep;
+  }
+
+  /** Starts the queue worker. Jobs left "running" by a previous process go back to the queue first. */
+  async start() {
+    await this.deps.store.resetRunning();
+    this.timer = setInterval(() => void this.tick(), this.deps.pollMs ?? 1000);
+    this.timer.unref?.();
+    void this.tick();
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    for (const a of this.albums.values()) if (a.timer) clearTimeout(a.timer);
+  }
+
+  private kick() {
+    if (!this.deps.inline) setImmediate(() => void this.tick());
   }
 
   /** The last few failures, newest first, so the dashboard can show why something did not arrive. */
@@ -157,66 +190,453 @@ export class BridgeService {
     }
     if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) return;
 
-    let mediaPath: string | undefined;
-    let downloadError: string | undefined;
-    const dir = join(
-      this.deps.tempDir,
-      `bridge-${msg.platform}-${msg.messageId}`.replace(/[^\w.-]/g, "_"),
+    if (msg.albumId && (msg.type === "image" || msg.type === "video")) {
+      this.bufferAlbum(msg, rules);
+      return;
+    }
+    await this.enqueueSend(msg, rules);
+    if (this.deps.inline) await this.processDue();
+  }
+
+  private liveKey = (m: { platform: Platform; chatId: string; messageId: string }) =>
+    `${m.platform}:${m.chatId}:${m.messageId}`;
+
+  private async enqueueSend(msg: BridgeMessage, rules: BridgeRule[]) {
+    this.live.set(this.liveKey(msg), msg);
+    if (this.live.size > 500) this.live.delete(this.live.keys().next().value as string);
+    for (const r of rules)
+      await this.deps.store.enqueue({
+        kind: "send",
+        ruleId: r.id,
+        dedupeKey: `s:${r.id}:${msg.platform}:${msg.chatId}:${msg.messageId}`,
+        payload: {
+          platform: msg.platform,
+          chatId: msg.chatId,
+          messageId: msg.messageId,
+          ref: msg.ref ?? null,
+        },
+      });
+    this.kick();
+  }
+
+  // ---- albums: members arrive as separate messages; wait briefly, then forward them together
+
+  private bufferAlbum(msg: BridgeMessage, rules: BridgeRule[]) {
+    const key = `${msg.platform}:${msg.chatId}:${msg.albumId}`;
+    const cur = this.albums.get(key) ?? { msgs: [], rules };
+    cur.msgs.push(msg);
+    cur.rules = rules;
+    if (cur.timer) clearTimeout(cur.timer);
+    if (!this.deps.inline) {
+      cur.timer = setTimeout(() => void this.flushAlbum(key), this.deps.albumWaitMs ?? 1500);
+      cur.timer.unref?.();
+    }
+    this.albums.set(key, cur);
+  }
+
+  /** Sends every buffered album now (also used by tests). */
+  async flushAlbums() {
+    for (const key of [...this.albums.keys()]) await this.flushAlbum(key);
+    if (this.deps.inline) await this.processDue();
+  }
+
+  private async flushAlbum(key: string) {
+    const a = this.albums.get(key);
+    if (!a) return;
+    this.albums.delete(key);
+    const msgs = [...a.msgs].sort(
+      (x, y) => x.timestamp - y.timestamp || Number(x.messageId) - Number(y.messageId) || 0,
     );
+    if (msgs.length === 1) return this.enqueueSend(msgs[0] as BridgeMessage, a.rules);
+    for (const m of msgs) this.live.set(this.liveKey(m), m);
+    const first = msgs[0] as BridgeMessage;
+    for (const r of a.rules)
+      await this.deps.store.enqueue({
+        kind: "album",
+        ruleId: r.id,
+        dedupeKey: `a:${r.id}:${first.platform}:${first.chatId}:${first.messageId}`,
+        payload: {
+          members: msgs.map((m) => ({
+            platform: m.platform,
+            chatId: m.chatId,
+            messageId: m.messageId,
+            ref: m.ref ?? null,
+          })),
+        },
+      });
+    this.kick();
+  }
+
+  // ---- edits and deletions of source messages
+
+  /** The source message was edited: update the copies the bridge made (text and captions only). */
+  async handleEdit(msg: BridgeMessage, editKey: string): Promise<void> {
+    const { store } = this.deps;
+    if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) return; // our own edit of a copy
+    const rules = matchRules(msg, await store.rules()).filter((r) => r.forwardEdits);
+    if (rules.length === 0) return;
+    this.seenMsg({
+      at: new Date(),
+      platform: msg.platform,
+      chat: msg.chatTitle || msg.chatId,
+      type: "edit",
+      fromMe: msg.fromMe,
+      rules: rules.length,
+    });
+    for (const r of rules) {
+      const out = buildOutgoing(msg, r);
+      await store.enqueue({
+        kind: "edit",
+        ruleId: r.id,
+        dedupeKey: `e:${r.id}:${msg.platform}:${msg.chatId}:${msg.messageId}:${editKey}`,
+        payload: {
+          srcPlatform: msg.platform,
+          srcChatId: msg.chatId,
+          srcMessageId: msg.messageId,
+          type: out.type,
+          text: out.text,
+        },
+      });
+    }
+    this.kick();
+    if (this.deps.inline) await this.processDue();
+  }
+
+  /** The source message was deleted: delete its copies. `chatId` may be unknown (Telegram, ordinary chats). */
+  async handleDelete(
+    platform: Platform,
+    chatId: string | undefined,
+    messageId: string,
+  ): Promise<void> {
+    const { store } = this.deps;
+    const rules = (await store.rules()).filter(
+      (r) =>
+        r.forwardDeletes &&
+        r.srcPlatform === platform &&
+        (chatId === undefined || r.srcChatId === chatId),
+    );
+    if (rules.length === 0) return;
+    const known = chatId
+      ? await store.copiesOf(platform, chatId, messageId)
+      : await store.copiesOfAnyChat(platform, messageId);
+    let n = 0;
+    for (const r of rules) {
+      // Without a chat id, only act when a copy exists; otherwise the id may belong to an unrelated chat.
+      if (chatId === undefined && !known.some((c) => c.ruleId === r.id)) continue;
+      n++;
+      await store.enqueue({
+        kind: "delete",
+        ruleId: r.id,
+        dedupeKey: `d:${r.id}:${platform}:${chatId ?? "?"}:${messageId}`,
+        payload: {
+          srcPlatform: platform,
+          srcChatId: chatId ?? known.find((c) => c.ruleId === r.id)?.srcChatId ?? r.srcChatId,
+          srcMessageId: messageId,
+        },
+      });
+    }
+    if (n === 0) return;
+    this.seenMsg({
+      at: new Date(),
+      platform,
+      chat: chatId ?? "?",
+      type: "delete",
+      fromMe: false,
+      rules: n,
+    });
+    this.kick();
+    if (this.deps.inline) await this.processDue();
+  }
+
+  // ---- the worker
+
+  /** Runs every job that is due, to completion. */
+  async processDue(): Promise<void> {
+    for (let guard = 0; guard < 50; guard++) {
+      const jobs = await this.deps.store.claimDue(25);
+      if (jobs.length === 0) return;
+      await this.runJobs(jobs);
+    }
+  }
+
+  private async tick() {
+    if (this.ticking) return;
+    this.ticking = true;
     try {
-      const animatedSticker = msg.type === "sticker" && msg.mimeType === "application/x-tgsticker";
-      if (isMediaType(msg.type) && msg.downloadMedia && !animatedSticker) {
-        try {
-          mediaPath = await withTimeout(
-            msg.downloadMedia(dir),
-            this.deps.downloadTimeoutMs ?? 90_000,
-            "download",
-          );
-        } catch (err) {
-          downloadError = short(err);
-          this.note({
-            at: new Date(),
-            platform: msg.platform,
-            type: msg.type,
-            stage: "download",
-            error: downloadError,
-          });
-          logger.warn({ err: String(err), type: msg.type }, "bridge: media download failed");
-        }
+      await this.processDue();
+      if (Date.now() - this.lastPurge > 3_600_000) {
+        this.lastPurge = Date.now();
+        await this.deps.store.purgeJobs(3 * 86_400_000);
       }
-      await Promise.all(rules.map((r) => this.forward(msg, r, mediaPath, downloadError)));
+    } catch (err) {
+      this.deps.logger.error({ err: String(err) }, "bridge: queue tick failed");
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  /** Jobs for different destination chats run side by side; jobs for the same chat keep their order. */
+  private async runJobs(jobs: JobRow[]) {
+    const rules = new Map((await this.deps.store.rules()).map((r) => [r.id, r]));
+    const lanes = new Map<string, JobRow[]>();
+    for (const j of jobs) {
+      const r = rules.get(j.ruleId);
+      const lane = r ? `${r.dstPlatform}:${r.dstChatId}:${r.dstTopicId}` : "orphan";
+      lanes.set(lane, [...(lanes.get(lane) ?? []), j]);
+    }
+    await Promise.all(
+      [...lanes.values()].map(async (list) => {
+        for (const j of list) await this.runJob(j, rules.get(j.ruleId));
+      }),
+    );
+  }
+
+  private async runJob(job: JobRow, rule: BridgeRule | undefined) {
+    const { store, logger } = this.deps;
+    try {
+      if (!rule || !rule.enabled) return void (await store.complete(job.id)); // rule removed or paused meanwhile
+      if (job.kind === "send") await this.runSend(job, rule);
+      else if (job.kind === "album") await this.runAlbum(job, rule);
+      else if (job.kind === "edit") await this.runEdit(job, rule);
+      else await this.runDelete(job, rule);
+      await store.complete(job.id);
+    } catch (err) {
+      const quick = job.kind === "edit" || job.kind === "delete";
+      const max = quick ? 4 : 5;
+      const delays = quick
+        ? [5_000, 10_000, 20_000, 40_000]
+        : [5_000, 30_000, 120_000, 600_000, 1_800_000];
+      const giveUp = job.attempts + 1 >= max;
+      this.note({
+        at: new Date(),
+        platform: rule?.dstPlatform ?? "telegram",
+        type: job.kind,
+        stage: "send",
+        error: short(err),
+      });
+      logger.warn(
+        { err: String(err), job: job.id, kind: job.kind, attempts: job.attempts },
+        "bridge: job failed",
+      );
+      if (giveUp && quick)
+        await store.complete(job.id); // an edit whose copy never appeared is simply dropped
+      else
+        await store.retryLater(
+          job.id,
+          short(err),
+          delays[Math.min(job.attempts, delays.length - 1)] ?? 60_000,
+          giveUp,
+        );
+    }
+  }
+
+  /** A job finished: its message no longer needs to be kept in memory. */
+  private forget(m: { platform: Platform; chatId: string; messageId: string }) {
+    this.live.delete(this.liveKey(m));
+  }
+
+  private async messageFor(m: {
+    platform: Platform;
+    chatId: string;
+    messageId: string;
+    ref?: unknown;
+  }): Promise<BridgeMessage | null> {
+    const hit = this.live.get(this.liveKey(m));
+    if (hit) return hit;
+    const ep = this.deps.endpoints[m.platform];
+    return m.ref ? ((await ep?.rehydrate?.(m.ref)) ?? null) : null;
+  }
+
+  private async runSend(job: JobRow, rule: BridgeRule) {
+    const p = job.payload as {
+      platform: Platform;
+      chatId: string;
+      messageId: string;
+      ref?: unknown;
+    };
+    const msg = await this.messageFor(p);
+    if (!msg) {
+      this.note({
+        at: new Date(),
+        platform: p.platform,
+        type: "send",
+        stage: "download",
+        error: "original message is no longer available",
+      });
+      return;
+    }
+    const { mediaPath, downloadError, dir } = await this.fetchMedia(msg);
+    try {
+      await this.deliver(msg, rule, mediaPath, downloadError);
+      this.forget(msg); // kept after a failure so the retry does not need to rebuild it
     } finally {
       if (mediaPath) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
-  private forward(
-    msg: BridgeMessage,
-    rule: BridgeRule,
-    mediaPath?: string,
-    downloadError?: string,
-  ): Promise<void> {
-    const lane = `${rule.dstPlatform}:${rule.dstChatId}:${rule.dstTopicId}`;
-    const run = (this.lanes.get(lane) ?? Promise.resolve()).then(() =>
-      this.deliver(msg, rule, mediaPath, downloadError).catch((err) => {
+  private async fetchMedia(msg: BridgeMessage) {
+    const dir = join(
+      this.deps.tempDir,
+      `bridge-${msg.platform}-${msg.messageId}`.replace(/[^\w.-]/g, "_"),
+    );
+    let mediaPath: string | undefined;
+    let downloadError: string | undefined;
+    const animatedSticker = msg.type === "sticker" && msg.mimeType === "application/x-tgsticker";
+    if (isMediaType(msg.type) && msg.downloadMedia && !animatedSticker) {
+      try {
+        mediaPath = await withTimeout(
+          msg.downloadMedia(dir),
+          this.deps.downloadTimeoutMs ?? 90_000,
+          "download",
+        );
+      } catch (err) {
+        downloadError = short(err);
         this.note({
           at: new Date(),
-          platform: rule.dstPlatform,
+          platform: msg.platform,
           type: msg.type,
-          stage: "send",
-          error: short(err),
+          stage: "download",
+          error: downloadError,
         });
-        this.deps.logger.error(
-          { err: String(err), rule: rule.id, type: msg.type },
-          "bridge: forwarding failed",
+        this.deps.logger.warn(
+          { err: String(err), type: msg.type },
+          "bridge: media download failed",
         );
-      }),
+      }
+    }
+    return { mediaPath, downloadError, dir };
+  }
+
+  private async runEdit(job: JobRow, rule: BridgeRule) {
+    const p = job.payload as {
+      srcPlatform: Platform;
+      srcChatId: string;
+      srcMessageId: string;
+      type: OutgoingBridge["type"];
+      text: string;
+    };
+    const dst = this.deps.endpoints[rule.dstPlatform];
+    if (!dst?.edit) return;
+    const copy = await this.deps.store.copyOf(
+      p.srcPlatform,
+      p.srcChatId,
+      p.srcMessageId,
+      rule.dstChatId,
     );
-    this.lanes.set(lane, run);
-    void run.finally(() => {
-      if (this.lanes.get(lane) === run) this.lanes.delete(lane);
-    });
-    return run;
+    if (!copy) throw new Error("the copy does not exist yet");
+    const dest = { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined };
+    const ok = await dst.edit(dest, copy, { type: p.type, text: p.text });
+    if (!ok)
+      this.note({
+        at: new Date(),
+        platform: rule.dstPlatform,
+        type: "edit",
+        stage: "send",
+        error: `${rule.dstPlatform} cannot edit this kind of message`,
+      });
+  }
+
+  private async runDelete(job: JobRow, rule: BridgeRule) {
+    const p = job.payload as { srcPlatform: Platform; srcChatId: string; srcMessageId: string };
+    const dst = this.deps.endpoints[rule.dstPlatform];
+    if (!dst?.remove) return;
+    const copy = await this.deps.store.copyOf(
+      p.srcPlatform,
+      p.srcChatId,
+      p.srcMessageId,
+      rule.dstChatId,
+    );
+    if (!copy) throw new Error("the copy does not exist yet");
+    await dst.remove({ chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined }, copy);
+  }
+
+  /** Forwards an album as one album where the destination supports it, otherwise one by one. */
+  private async runAlbum(job: JobRow, rule: BridgeRule) {
+    const refs = (
+      job.payload as {
+        members: { platform: Platform; chatId: string; messageId: string; ref?: unknown }[];
+      }
+    ).members;
+    const msgs: BridgeMessage[] = [];
+    for (const r of refs) {
+      const m = await this.messageFor(r);
+      if (m) msgs.push(m);
+    }
+    if (msgs.length === 0) return;
+    const dst = this.deps.endpoints[rule.dstPlatform];
+    if (!dst) throw new Error(`${rule.dstPlatform} is not connected`);
+    const fetched = [];
+    for (const m of msgs) fetched.push({ m, ...(await this.fetchMedia(m)) });
+    const key = `${rule.dstPlatform}:${rule.dstChatId}`;
+    this.inflight.set(key, (this.inflight.get(key) ?? 0) + 1);
+    try {
+      const allReady = fetched.every(
+        (f) => f.mediaPath && (f.m.type === "image" || f.m.type === "video"),
+      );
+      if (dst.sendAlbum && allReady) {
+        const first = msgs[0] as BridgeMessage;
+        const head = buildOutgoing({ ...first, text: "" }, rule).text;
+        const caption = [head, ...msgs.map((m) => m.text.trim())].filter(Boolean).join("\n");
+        const items: AlbumItem[] = fetched.map((f, i) => ({
+          type: f.m.type as "image" | "video",
+          filePath: f.mediaPath as string,
+          fileName: f.m.fileName,
+          text: i === 0 ? caption : "",
+        }));
+        try {
+          const ids = await withTimeout(
+            dst.sendAlbum(
+              { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined },
+              items,
+              await this.replyTarget(first, rule),
+            ),
+            (this.deps.uploadTimeoutMs ?? 300_000) * 2,
+            "album send",
+          );
+          for (let i = 0; i < msgs.length; i++) {
+            const id = ids[i];
+            const m = msgs[i] as BridgeMessage;
+            if (id)
+              await this.deps.store.addLink({
+                platform: rule.dstPlatform,
+                chatId: rule.dstChatId,
+                messageId: id,
+                srcPlatform: m.platform,
+                srcChatId: m.chatId,
+                srcMessageId: m.messageId,
+                ruleId: rule.id,
+              });
+          }
+          for (const f of fetched) this.forget(f.m);
+          return;
+        } catch (err) {
+          this.note({
+            at: new Date(),
+            platform: rule.dstPlatform,
+            type: "album",
+            stage: "send",
+            error: short(err),
+          });
+        }
+      }
+      // One by one: the name goes on the first picture only.
+      for (let i = 0; i < fetched.length; i++) {
+        const f = fetched[i] as (typeof fetched)[number];
+        await this.deliver(
+          f.m,
+          i === 0 ? rule : { ...rule, senderMode: "none" },
+          f.mediaPath,
+          f.downloadError,
+        );
+      }
+      for (const f of fetched) this.forget(f.m);
+    } finally {
+      const n = (this.inflight.get(key) ?? 1) - 1;
+      if (n <= 0) this.inflight.delete(key);
+      else this.inflight.set(key, n);
+      for (const f of fetched)
+        if (f.mediaPath) await rm(f.dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   private async replyTarget(msg: BridgeMessage, rule: BridgeRule): Promise<string | undefined> {

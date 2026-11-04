@@ -279,6 +279,9 @@ export const bridgeRules = pgTable("bridge_rules", {
   customName: text("custom_name").notNull().default(""),
   /** Forward messages written by the linked account itself. */
   forwardOwn: boolean("forward_own").notNull().default(true),
+  /** Mirror edits / deletions of the source message onto its copy. */
+  forwardEdits: boolean("forward_edits").notNull().default(true),
+  forwardDeletes: boolean("forward_deletes").notNull().default(true),
   createdAt: now(),
 });
 
@@ -316,4 +319,26 @@ export const bridgeLinks = pgTable(
     uniqueIndex("bridge_links_dst_uq").on(t.platform, t.chatId, t.messageId),
     index("bridge_links_src_idx").on(t.srcPlatform, t.srcChatId, t.srcMessageId),
   ],
+);
+
+/** Durable work queue: a restart or a failed destination never loses a forward. */
+export const bridgeJobs = pgTable(
+  "bridge_jobs",
+  {
+    id: serial("id").primaryKey(),
+    /** send | album | edit | delete */
+    kind: text("kind").notNull(),
+    ruleId: integer("rule_id").notNull(),
+    /** One job per (kind, rule, source message[, edit time]): the same event twice never doubles. */
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    payload: jsonb("payload").notNull(),
+    /** pending | running | done | failed */
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: now(),
+    updatedAt: touched(),
+  },
+  (t) => [index("bridge_jobs_due_idx").on(t.status, t.nextAttemptAt)],
 );

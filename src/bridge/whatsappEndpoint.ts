@@ -1,10 +1,11 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AnyMessageContent, WAMessage } from "@whiskeysockets/baileys";
-import { jidNormalizedUser, normalizeMessageContent } from "@whiskeysockets/baileys";
+import { BufferJSON, jidNormalizedUser, normalizeMessageContent } from "@whiskeysockets/baileys";
 import { planMedia } from "../providers/whatsapp/baileys/media.js";
 import type { BaileysProvider } from "../providers/whatsapp/baileys/provider.js";
 import type {
+  AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
   ChatInfo,
@@ -23,7 +24,16 @@ const IGNORED_KINDS = new Set([
   "pollUpdateMessage",
   "encReactionMessage",
   "deviceSentMessage",
+  "albumMessage",
 ]);
+const toSeconds = (t: unknown): number => {
+  if (typeof t === "number") return t;
+  if (typeof t === "string" && /^\d+$/.test(t)) return Number(t);
+  const o = t as { low?: number; high?: number; toNumber?: () => number } | undefined;
+  if (o?.toNumber) return o.toNumber();
+  if (typeof o?.low === "number") return o.low + (o.high ?? 0) * 2 ** 32;
+  return Math.floor(Date.now() / 1000);
+};
 const PN = "@s.whatsapp.net";
 const MIME_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -133,6 +143,13 @@ export function whatsappToBridge(
   const senderJid = isGroup
     ? ((key.participantAlt as string | undefined) ?? key.participant ?? "")
     : ((key.remoteJidAlt as string | undefined) ?? chat);
+  const assoc = (
+    m.message as
+      | { messageContextInfo?: { messageAssociation?: { parentMessageKey?: { id?: string } } } }
+      | undefined
+  )?.messageContextInfo?.messageAssociation;
+  const albumId =
+    type === "image" || type === "video" ? (assoc?.parentMessageKey?.id ?? undefined) : undefined;
   const mediaTypes: MessageType[] = ["image", "video", "audio", "voice", "document", "sticker"];
   return {
     platform: "whatsapp",
@@ -157,10 +174,9 @@ export function whatsappToBridge(
     contact,
     poll,
     replyToId: ctx?.stanzaId ?? undefined,
-    timestamp:
-      typeof m.messageTimestamp === "number"
-        ? m.messageTimestamp
-        : Number(m.messageTimestamp ?? Math.floor(Date.now() / 1000)),
+    timestamp: toSeconds(m.messageTimestamp),
+    albumId,
+    ref: { raw: JSON.stringify(m, BufferJSON.replacer) },
     fromMe: !!key.fromMe,
     downloadMedia: mediaTypes.includes(type)
       ? async (dir) => {
@@ -184,16 +200,75 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
     private readonly onError: (err: unknown) => void,
     /** Called for messages that carry content the bridge does not recognise (so it is visible, not silent). */
     private readonly onUnrecognised?: (chat: string, kinds: string[]) => void,
+    private readonly hooks: {
+      onEdit?: (m: BridgeMessage, editKey: string) => Promise<void>;
+      onDelete?: (chatId: string | undefined, messageId: string) => Promise<void>;
+    } = {},
   ) {}
 
-  /** Wire this to BaileysDeps.onRawMessage. */
-  tap = (m: WAMessage) => {
-    const msg = whatsappToBridge(
+  private toBridge(m: WAMessage): BridgeMessage | null {
+    return whatsappToBridge(
       m,
       (jid) => this.titles.get(jid) ?? jid,
       (x) => this.wa.downloadBuffer(x),
       (jids) => this.wa.savedNameOf(...jids),
     );
+  }
+
+  /** Wire this to BaileysDeps.onRawUpdate: edits and "delete for everyone" arrive as message updates. */
+  tapUpdate = (updates: { key: WAMessage["key"]; update: Partial<WAMessage> }[]) => {
+    for (const { key, update } of updates) {
+      if (!key?.id || !key.remoteJid) continue;
+      if (update.messageStubType === 1 /* REVOKE */) {
+        void this.hooks.onDelete?.(key.remoteJid, key.id)?.catch(this.onError);
+        continue;
+      }
+      const edited = (
+        update.message as { editedMessage?: { message?: unknown } } | null | undefined
+      )?.editedMessage?.message;
+      if (edited) {
+        const msg = this.toBridge({
+          key,
+          message: edited,
+          pushName: this.wa.recentMessage(key.id)?.pushName,
+          messageTimestamp: update.messageTimestamp,
+        } as unknown as WAMessage);
+        if (msg)
+          void this.hooks
+            .onEdit?.(msg, String(toSeconds(update.messageTimestamp)))
+            ?.catch(this.onError);
+      }
+    }
+  };
+
+  /** Rebuilds a message after a restart from the raw copy stored with a queued job. */
+  async rehydrate(ref: unknown): Promise<BridgeMessage | null> {
+    const raw = (ref as { raw?: string } | null)?.raw;
+    if (!raw) return null;
+    return this.toBridge(JSON.parse(raw, BufferJSON.reviver) as WAMessage);
+  }
+
+  async edit(dest: Destination, messageId: string, out: OutgoingBridge): Promise<boolean> {
+    // WhatsApp can edit text, but not the caption of a picture/video/document.
+    if (out.type !== "text") return false;
+    return this.wa.editText(dest.chatId, messageId, out.text);
+  }
+
+  async remove(dest: Destination, messageId: string): Promise<boolean> {
+    return this.wa.deleteMessage(dest.chatId, messageId);
+  }
+
+  async sendAlbum(dest: Destination, items: AlbumItem[], replyToId?: string): Promise<string[]> {
+    return this.wa.sendAlbum(
+      dest.chatId,
+      items.map((i) => ({ type: i.type, path: i.filePath, caption: i.text })),
+      replyToId,
+    );
+  }
+
+  /** Wire this to BaileysDeps.onRawMessage. */
+  tap = (m: WAMessage) => {
+    const msg = this.toBridge(m);
     if (msg) {
       if (msg.type === "text" && !msg.text.trim() && msg.chatId) {
         const keys = Object.keys((normalizeMessageContent(m.message) as object | undefined) ?? {});

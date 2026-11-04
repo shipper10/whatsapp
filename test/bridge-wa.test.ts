@@ -1,5 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import type { WAMessage } from "@whiskeysockets/baileys";
+import { BufferJSON } from "@whiskeysockets/baileys";
 import { describe, expect, it } from "vitest";
 import { whatsappToBridge } from "../src/bridge/whatsappEndpoint.js";
 
@@ -82,5 +83,39 @@ describe("media is never mistaken for text", () => {
     expect(m?.text).toBe("cap");
     const n = conv(base({ conversation: "", imageMessage: { mimetype: "image/png" } }));
     expect(n?.type).toBe("image");
+  });
+});
+
+describe("album and restart support", () => {
+  it("reads the album id of a picture that belongs to an album", () => {
+    const m = conv(
+      base({
+        imageMessage: { mimetype: "image/jpeg" },
+        messageContextInfo: {
+          messageAssociation: { associationType: 1, parentMessageKey: { id: "PARENT1" } },
+        },
+      }),
+    );
+    expect(m?.albumId).toBe("PARENT1");
+    expect(conv(base({ imageMessage: { mimetype: "image/jpeg" } }))?.albumId).toBeUndefined();
+  });
+
+  it("survives being stored and rebuilt (media key and timestamp included)", () => {
+    const original = base(
+      {
+        imageMessage: { mimetype: "image/jpeg", mediaKey: Buffer.from("secret-key"), caption: "c" },
+      },
+      { messageTimestamp: { low: 1700000000, high: 0, unsigned: true } },
+    );
+    const m = conv(original);
+    const raw = (m?.ref as { raw: string }).raw;
+    const back = conv(JSON.parse(raw, BufferJSON.reviver) as WAMessage);
+    expect(back?.type).toBe("image");
+    expect(back?.text).toBe("c");
+    expect(back?.timestamp).toBe(1700000000);
+    const key = (
+      JSON.parse(raw, BufferJSON.reviver) as { message: { imageMessage: { mediaKey: Buffer } } }
+    ).message.imageMessage.mediaKey;
+    expect(Buffer.from(key).toString()).toBe("secret-key");
   });
 });

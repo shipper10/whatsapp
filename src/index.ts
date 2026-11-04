@@ -89,6 +89,7 @@ const driveClientFor = (credentialRef: string) => {
 // Lite mode: Baileys inside this process, login kept in Postgres. Messages reach the handler via this late-bound hook.
 let onIncoming: (id: string, msg: IncomingMessage) => Promise<void> = async () => undefined;
 let bridgeTap: ((m: WAMessage) => void) | undefined;
+let bridgeUpdateTap: ((u: never) => void) | undefined;
 const baileys =
   env.WHATSAPP_PROVIDER === "baileys"
     ? new BaileysProvider({
@@ -97,6 +98,7 @@ const baileys =
         baileysLogger: createLogger("warn"),
         onMessage: (id, msg) => onIncoming(id, msg),
         onRawMessage: env.BRIDGE_ENABLED ? (m) => bridgeTap?.(m) : undefined,
+        onRawUpdate: env.BRIDGE_ENABLED ? (u) => bridgeUpdateTap?.(u as never) : undefined,
         minSendGapMs: () => settings.get("whatsapp.minSendGapMs"),
       })
     : null;
@@ -215,6 +217,7 @@ onIncoming = (id, msg) => handler.handle(id, msg);
 let bridgeTelegram: TelegramBridgeEndpoint | null = null;
 let bridgeUi: ReturnType<typeof createBridgeUi> | undefined;
 let bridgeRefresh: (() => Promise<unknown>) | undefined;
+let bridgeService: BridgeService | undefined;
 if (env.BRIDGE_ENABLED && baileys) {
   const store = new BridgeStore(db);
   const endpoints: ConstructorParameters<typeof BridgeService>[0]["endpoints"] = {};
@@ -224,9 +227,15 @@ if (env.BRIDGE_ENABLED && baileys) {
     (m) => svc.handle(m),
     (err) => log.error({ err: String(err) }, "bridge: WhatsApp message failed"),
     (chat, kinds) => void svc.noteUnrecognised("whatsapp", chat, kinds).catch(() => undefined),
+    {
+      onEdit: (m, key) => svc.handleEdit(m, key),
+      onDelete: (chat, id) => svc.handleDelete("whatsapp", chat, id),
+    },
   );
   endpoints.whatsapp = wa;
   bridgeTap = wa.tap;
+  bridgeUpdateTap = wa.tapUpdate as (u: never) => void;
+  bridgeService = svc;
   if (env.TELEGRAM_API_ID && env.TELEGRAM_API_HASH && env.BRIDGE_TELEGRAM_SESSION_STRING) {
     bridgeTelegram = new TelegramBridgeEndpoint(
       {
@@ -236,6 +245,10 @@ if (env.BRIDGE_ENABLED && baileys) {
       },
       log,
       (m) => svc.handle(m),
+      {
+        onEdit: (m, key) => svc.handleEdit(m, key),
+        onDelete: (chat, id) => svc.handleDelete("telegram", chat, id),
+      },
     );
     endpoints.telegram = bridgeTelegram;
   } else {
@@ -251,6 +264,8 @@ if (env.BRIDGE_ENABLED && baileys) {
     refresh: () => svc.refreshChats(),
     problems: () => svc.problems(),
     activity: () => svc.activity(),
+    queue: () => store.queueStats(),
+    failedJobs: () => store.failedJobs(),
   });
 }
 
@@ -323,6 +338,11 @@ if (baileys) {
   await baileys.start();
   log.info({}, "WhatsApp (Baileys) starting; open /admin/link?token=... to link if not linked yet");
 }
+if (bridgeService) {
+  void bridgeService
+    .start()
+    .catch((e) => log.error({ err: String(e) }, "bridge: queue worker failed to start"));
+}
 if (bridgeTelegram) {
   void bridgeTelegram
     .start()
@@ -364,6 +384,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     clearInterval(maintenance);
     if (bridgeTimer) clearInterval(bridgeTimer);
+    bridgeService?.stop();
     keepAlive.stop();
     scheduler.stop();
     server.close();

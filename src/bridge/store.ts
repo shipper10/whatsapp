@@ -1,6 +1,6 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
-import { bridgeChats, bridgeLinks, bridgeRules } from "../db/schema.js";
+import { bridgeChats, bridgeJobs, bridgeLinks, bridgeRules } from "../db/schema.js";
 import {
   type BridgeRule,
   type ChatInfo,
@@ -30,6 +30,8 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   customName: r.customName,
   showPhone: r.showPhone,
   forwardOwn: r.forwardOwn,
+  forwardEdits: r.forwardEdits,
+  forwardDeletes: r.forwardDeletes,
 });
 
 export class BridgeStore {
@@ -170,4 +172,177 @@ export class BridgeStore {
       .limit(1);
     return rows[0];
   }
+
+  /** Every copy the bridge made of a source message (one per matching rule). */
+  async copiesOf(srcPlatform: Platform, srcChatId: string, srcMessageId: string) {
+    return this.db
+      .select({
+        platform: bridgeLinks.platform,
+        chatId: bridgeLinks.chatId,
+        messageId: bridgeLinks.messageId,
+        ruleId: bridgeLinks.ruleId,
+        srcChatId: bridgeLinks.srcChatId,
+      })
+      .from(bridgeLinks)
+      .where(
+        and(
+          eq(bridgeLinks.srcPlatform, srcPlatform),
+          eq(bridgeLinks.srcChatId, srcChatId),
+          eq(bridgeLinks.srcMessageId, srcMessageId),
+        ),
+      );
+  }
+
+  /** Telegram does not always say which chat a deletion came from; ids of ordinary chats are unique per account. */
+  async copiesOfAnyChat(srcPlatform: Platform, srcMessageId: string) {
+    return this.db
+      .select({
+        platform: bridgeLinks.platform,
+        chatId: bridgeLinks.chatId,
+        messageId: bridgeLinks.messageId,
+        ruleId: bridgeLinks.ruleId,
+        srcChatId: bridgeLinks.srcChatId,
+      })
+      .from(bridgeLinks)
+      .where(
+        and(eq(bridgeLinks.srcPlatform, srcPlatform), eq(bridgeLinks.srcMessageId, srcMessageId)),
+      );
+  }
+
+  // ---- durable queue
+
+  /** Adds a job; returns false when the same job already exists (duplicate event). */
+  async enqueue(job: {
+    kind: JobKind;
+    ruleId: number;
+    dedupeKey: string;
+    payload: unknown;
+    delayMs?: number;
+  }): Promise<boolean> {
+    const rows = await this.db
+      .insert(bridgeJobs)
+      .values({
+        kind: job.kind,
+        ruleId: job.ruleId,
+        dedupeKey: job.dedupeKey,
+        payload: job.payload,
+        nextAttemptAt: new Date(Date.now() + (job.delayMs ?? 0)),
+      })
+      .onConflictDoNothing()
+      .returning({ id: bridgeJobs.id });
+    return rows.length > 0;
+  }
+
+  /** Takes the oldest due jobs and marks them running. */
+  async claimDue(limit: number): Promise<JobRow[]> {
+    const due = await this.db
+      .select()
+      .from(bridgeJobs)
+      .where(and(eq(bridgeJobs.status, "pending"), lte(bridgeJobs.nextAttemptAt, new Date())))
+      .orderBy(asc(bridgeJobs.id))
+      .limit(limit);
+    if (due.length === 0) return [];
+    // Only rows still pending are flipped, so two workers can never take the same job.
+    const taken = await this.db
+      .update(bridgeJobs)
+      .set({ status: "running", updatedAt: new Date() })
+      .where(
+        and(
+          inArray(
+            bridgeJobs.id,
+            due.map((j) => j.id),
+          ),
+          eq(bridgeJobs.status, "pending"),
+        ),
+      )
+      .returning();
+    return taken.sort((a, b) => a.id - b.id).map(toJob);
+  }
+
+  async complete(id: number) {
+    await this.db
+      .update(bridgeJobs)
+      .set({ status: "done", updatedAt: new Date() })
+      .where(eq(bridgeJobs.id, id));
+  }
+
+  /** Put back for another try, or mark failed for good. */
+  async retryLater(id: number, error: string, delayMs: number, giveUp: boolean) {
+    await this.db
+      .update(bridgeJobs)
+      .set({
+        status: giveUp ? "failed" : "pending",
+        attempts: sql`${bridgeJobs.attempts} + 1`,
+        lastError: error.slice(0, 500),
+        nextAttemptAt: new Date(Date.now() + delayMs),
+        updatedAt: new Date(),
+      })
+      .where(eq(bridgeJobs.id, id));
+  }
+
+  /** After a restart nothing is really running: those jobs go back to the queue. */
+  async resetRunning() {
+    await this.db
+      .update(bridgeJobs)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(eq(bridgeJobs.status, "running"));
+  }
+
+  async queueStats() {
+    const rows = await this.db
+      .select({ status: bridgeJobs.status, n: sql<number>`count(*)::int` })
+      .from(bridgeJobs)
+      .groupBy(bridgeJobs.status);
+    const get = (s: string) => rows.find((r) => r.status === s)?.n ?? 0;
+    return {
+      pending: get("pending"),
+      running: get("running"),
+      failed: get("failed"),
+      done: get("done"),
+    };
+  }
+
+  async failedJobs(limit = 10): Promise<JobRow[]> {
+    const rows = await this.db
+      .select()
+      .from(bridgeJobs)
+      .where(eq(bridgeJobs.status, "failed"))
+      .orderBy(sql`${bridgeJobs.id} desc`)
+      .limit(limit);
+    return rows.map(toJob);
+  }
+
+  /** Forget finished jobs after a few days so the table stays small. */
+  async purgeJobs(olderThanMs: number) {
+    await this.db
+      .delete(bridgeJobs)
+      .where(
+        and(
+          eq(bridgeJobs.status, "done"),
+          lte(bridgeJobs.updatedAt, new Date(Date.now() - olderThanMs)),
+        ),
+      );
+  }
 }
+
+export type JobKind = "send" | "album" | "edit" | "delete";
+
+export interface JobRow {
+  id: number;
+  kind: JobKind;
+  ruleId: number;
+  dedupeKey: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+  lastError: string | null;
+}
+
+const toJob = (r: typeof bridgeJobs.$inferSelect): JobRow => ({
+  id: r.id,
+  kind: r.kind as JobKind,
+  ruleId: r.ruleId,
+  dedupeKey: r.dedupeKey,
+  payload: r.payload as Record<string, unknown>,
+  attempts: r.attempts,
+  lastError: r.lastError,
+});

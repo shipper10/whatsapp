@@ -25,6 +25,8 @@ export interface BridgeUiDeps {
     fromMe: boolean;
     rules: number;
   }[];
+  queue?: () => Promise<{ pending: number; running: number; failed: number }>;
+  failedJobs?: () => Promise<{ kind: string; lastError: string | null }[]>;
   problems?: () => { at: Date; platform: Platform; type: string; stage: string; error: string }[];
 }
 
@@ -179,6 +181,12 @@ function render(
     fromMe: boolean;
     rules: number;
   }[] = [],
+  queue?: {
+    pending: number;
+    running: number;
+    failed: number;
+    failedList: { kind: string; lastError: string | null }[];
+  },
 ) {
   const all = [...chats.whatsapp, ...chats.telegram];
   const labelOf = (v: string | undefined) => {
@@ -195,11 +203,13 @@ function render(
     customName: "",
     showPhone: true,
     forwardOwn: true,
+    forwardEdits: true,
+    forwardDeletes: true,
   };
   const ruleRows = rules
     .map(
       (r) =>
-        `<tr><td>${r.enabled ? "🟢" : "⚪"} ${esc(describeRule(r, all))}<div class="muted">${esc(r.types.join(", "))} • name: ${esc(r.senderMode === "custom" ? `“${r.customName}”` : r.senderMode)}${r.showPhone ? " + phone" : ""}${r.forwardOwn ? "" : " • my own messages: no"}</div></td>
+        `<tr><td>${r.enabled ? "🟢" : "⚪"} ${esc(describeRule(r, all))}<div class="muted">${esc(r.types.join(", "))} • name: ${esc(r.senderMode === "custom" ? `“${r.customName}”` : r.senderMode)}${r.showPhone ? " + phone" : ""}${r.forwardOwn ? "" : " • my own messages: no"}${r.forwardEdits ? "" : " • edits: no"}${r.forwardDeletes ? "" : " • deletes: no"}</div></td>
 <td><a href="${link(s, { edit: r.id, src: ref(r.srcPlatform, r.srcChatId, r.srcTopicId), dst: ref(r.dstPlatform, r.dstChatId, r.dstTopicId) }, "#builder")}">Edit</a></td>
 <td><form method="post" action="${here}/rules/${r.id}/toggle"><button class="alt" style="color:inherit;border-color:var(--line)">${r.enabled ? "Pause" : "Resume"}</button></form></td>
 <td><form method="post" action="${here}/rules/${r.id}/delete"><button class="alt">Delete</button></form></td></tr>`,
@@ -220,12 +230,14 @@ ${editing ? `<input type="hidden" name="edit" value="${editing.id}">` : `<p><lab
 <p><label>Sender name <select name="senderMode">${SENDER_MODES.map((m) => `<option value="${m}"${m === o.senderMode ? " selected" : ""}>${esc(SENDER_LABEL[m])}</option>`).join("")}</select></label></p>
 <p><label>Fixed name (used when “A fixed name” is selected) <input name="customName" value="${esc(o.customName)}" maxlength="60"></label></p>
 <p>${check("showPhone", o.showPhone, "show phone number (when available)")}${check("forwardOwn", o.forwardOwn, "also forward messages written by my own account")}</p>
+<p>${check("forwardEdits", o.forwardEdits, "mirror edits")}${check("forwardDeletes", o.forwardDeletes, "mirror deletions")}</p>
 <p><button>${editing ? "Save changes" : "Add rule"}</button>${editing ? ` <a href="${link({ ...s, edit: undefined, src: undefined, dst: undefined }, {}, "")}">cancel</a>` : ""}</p></form></div>`;
   return page(
     "Bridge",
     `<h1>WhatsApp ⇄ Telegram bridge</h1>
 ${flash ? `<div class="flash${flash.err ? " err" : ""}">${esc(flash.text)}</div>` : ""}
 <div class="card"><h2>Rules</h2><table>${ruleRows || '<tr><td class="muted">no rules yet</td></tr>'}</table></div>
+${queue ? `<div class="card"><h2>Queue</h2><p>${queue.pending} waiting • ${queue.running} sending • <span class="${queue.failed ? "bad" : "ok"}">${queue.failed} failed for good</span></p>${queue.failedList.length ? `<table>${queue.failedList.map((f) => `<tr><td>${esc(f.kind)}</td><td class="bad">${esc(f.lastError ?? "")}</td></tr>`).join("")}</table>` : ""}</div>` : ""}
 <div class="card"><h2>Recent problems</h2><table>${
       problems
         .slice(0, 10)
@@ -261,6 +273,9 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
       deps.store.chats("whatsapp"),
       deps.store.chats("telegram"),
     ]);
+    const queue = deps.queue
+      ? { ...(await deps.queue()), failedList: (await deps.failedJobs?.()) ?? [] }
+      : undefined;
     const editing = s.edit ? rules.find((r) => r.id === s.edit) : undefined;
     if (editing && !s.src && !s.dst) {
       s = {
@@ -280,6 +295,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         flash,
         deps.problems?.(),
         deps.activity?.(),
+        queue,
       ),
     };
   };
@@ -358,6 +374,8 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         customName,
         showPhone: form.get("showPhone") === "1",
         forwardOwn: form.get("forwardOwn") === "1",
+        forwardEdits: form.get("forwardEdits") === "1",
+        forwardDeletes: form.get("forwardDeletes") === "1",
       };
       const mk = (a: Ref, b: Ref): NewRule => ({
         ...base,

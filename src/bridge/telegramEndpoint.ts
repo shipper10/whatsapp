@@ -1,9 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Api, TelegramClient } from "teleproto";
-import { NewMessage, type NewMessageEvent } from "teleproto/events";
+import { DeletedMessage, EditedMessage, NewMessage, type NewMessageEvent } from "teleproto/events";
 import { StringSession } from "teleproto/sessions";
 import type {
+  AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
   ChatInfo,
@@ -60,6 +61,10 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
     private readonly cfg: TelegramBridgeConfig,
     private readonly logger: Logger,
     private readonly onMessage: (m: BridgeMessage) => Promise<void>,
+    private readonly hooks: {
+      onEdit?: (m: BridgeMessage, editKey: string) => Promise<void>;
+      onDelete?: (chatId: string | undefined, messageId: string) => Promise<void>;
+    } = {},
   ) {}
 
   ready() {
@@ -82,6 +87,22 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
         this.logger.error({ err: String(err) }, "bridge: telegram message failed"),
       );
     }, new NewMessage({}));
+    client.addEventHandler((e: NewMessageEvent) => {
+      void this.handleEdit(e).catch((err) =>
+        this.logger.error({ err: String(err) }, "bridge: telegram edit failed"),
+      );
+    }, new EditedMessage({}));
+    client.addEventHandler((e: { deletedIds: number[]; chatId?: unknown }) => {
+      const chat = e.chatId !== undefined && e.chatId !== null ? id(e.chatId) : undefined;
+      for (const mid of e.deletedIds)
+        void this.hooks
+          .onDelete?.(chat, String(mid))
+          ?.catch((err) =>
+            this.logger.error({ err: String(err) }, "bridge: telegram delete failed"),
+          );
+    }, new DeletedMessage({}));
+    // Warm the entity cache so chats can be addressed by id after a restart (rehydrating queued jobs).
+    await client.getDialogs({ limit: 200 }).catch(() => undefined);
     this.started = true;
     this.logger.info({}, "bridge: Telegram connected");
   }
@@ -93,8 +114,29 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
   }
 
   private async handle(e: NewMessageEvent) {
-    const m = e.message;
-    if (!m || !this.client) return;
+    if (!e.message) return;
+    const msg = await this.toBridge(e.message);
+    if (msg) await this.onMessage(msg);
+  }
+
+  private async handleEdit(e: NewMessageEvent) {
+    if (!e.message) return;
+    const msg = await this.toBridge(e.message);
+    if (msg)
+      await this.hooks.onEdit?.(msg, String(e.message.editDate ?? e.message.date ?? Date.now()));
+  }
+
+  /** Rebuilds a message after a restart from the (chat, id) handle stored with a queued job. */
+  async rehydrate(ref: unknown): Promise<BridgeMessage | null> {
+    const r = ref as { chatId?: string; messageId?: string } | null;
+    if (!this.client || !r?.chatId || !r.messageId) return null;
+    const entity = await this.client.getInputEntity(r.chatId);
+    const [m] = await this.client.getMessages(entity, { ids: [Number(r.messageId)] });
+    return m instanceof Api.Message ? this.toBridge(m) : null;
+  }
+
+  private async toBridge(m: Api.Message): Promise<BridgeMessage | null> {
+    if (!this.client) return null;
     const chat = await m.getChat().catch(() => undefined);
     const sender = (await m.getSender().catch(() => undefined)) as
       | (Api.User & { title?: string })
@@ -161,6 +203,8 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
             }
           : undefined,
       replyToId: m.replyTo?.replyToMsgId ? String(m.replyTo.replyToMsgId) : undefined,
+      albumId: m.groupedId ? String(m.groupedId) : undefined,
+      ref: { chatId, messageId: String(m.id) },
       timestamp: m.date,
       fromMe: !!m.out,
       downloadMedia: ["text", "location", "contact", "poll"].includes(type)
@@ -174,7 +218,7 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
             return out;
           },
     };
-    await this.onMessage(msg);
+    return msg;
   }
 
   private mimeOf(m: Api.Message): string | undefined {
@@ -221,6 +265,34 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
       sent = await this.client.sendMessage(entity, { message: out.text, ...common });
     }
     return sent?.id !== undefined ? String(sent.id) : undefined;
+  }
+
+  async edit(dest: Destination, messageId: string, out: OutgoingBridge): Promise<boolean> {
+    if (!this.client) throw new Error("Telegram bridge not connected");
+    const entity = await this.client.getInputEntity(dest.chatId);
+    await this.client.editMessage(entity, { message: Number(messageId), text: out.text });
+    return true;
+  }
+
+  async remove(dest: Destination, messageId: string): Promise<boolean> {
+    if (!this.client) throw new Error("Telegram bridge not connected");
+    const entity = await this.client.getInputEntity(dest.chatId);
+    await this.client.deleteMessages(entity, [Number(messageId)], { revoke: true });
+    return true;
+  }
+
+  /** Pictures/videos sent together become one Telegram album (the caption belongs to the first item). */
+  async sendAlbum(dest: Destination, items: AlbumItem[], replyToId?: string): Promise<string[]> {
+    if (!this.client) throw new Error("Telegram bridge not connected");
+    const entity = await this.client.getInputEntity(dest.chatId);
+    const replyTo = replyToId ? Number(replyToId) : dest.topicId ? Number(dest.topicId) : undefined;
+    const sent = await this.client.sendFile(entity, {
+      file: items.map((i) => i.filePath),
+      caption: items.map((i) => i.text),
+      replyTo,
+      ...(dest.topicId && replyToId ? { topMsgId: Number(dest.topicId) } : {}),
+    });
+    return (Array.isArray(sent) ? sent : [sent]).map((m) => String(m.id));
   }
 
   async listChats(): Promise<ChatInfo[]> {

@@ -57,6 +57,13 @@
       "when": 1793709993752,
       "tag": "0007_bridge_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793773538582,
+      "tag": "0008_bridge_queue",
+      "breakpoints": true
     }
   ]
 }

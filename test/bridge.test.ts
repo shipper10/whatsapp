@@ -1,11 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import { Readable } from "node:stream";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildOutgoing, matchRules } from "../src/bridge/engine.js";
 import { BridgeService } from "../src/bridge/service.js";
 import { BridgeStore } from "../src/bridge/store.js";
 import type {
+  AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
   BridgeRule,
@@ -43,6 +44,8 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   customName: "",
   showPhone: true,
   forwardOwn: true,
+  forwardEdits: true,
+  forwardDeletes: true,
   ...o,
 });
 
@@ -63,6 +66,11 @@ const msg = (o: Partial<BridgeMessage> = {}): BridgeMessage => ({
 
 class FakeEndpoint implements BridgeEndpoint {
   sent: { dest: Destination; out: OutgoingBridge }[] = [];
+  edited: { messageId: string; text: string }[] = [];
+  removed: string[] = [];
+  albums: { items: AlbumItem[]; replyToId?: string }[] = [];
+  withAlbums = false;
+  hydrate = new Map<string, BridgeMessage>();
   failures: unknown[] = [];
   n = 0;
   constructor(
@@ -82,6 +90,24 @@ class FakeEndpoint implements BridgeEndpoint {
   }
   async listChats() {
     return [];
+  }
+  async edit(_d: Destination, messageId: string, out: OutgoingBridge) {
+    this.edited.push({ messageId, text: out.text });
+    return true;
+  }
+  async remove(_d: Destination, messageId: string) {
+    this.removed.push(messageId);
+    return true;
+  }
+  async rehydrate(ref: unknown) {
+    return this.hydrate.get((ref as { id: string }).id) ?? null;
+  }
+  get sendAlbum() {
+    if (!this.withAlbums) return undefined;
+    return async (_d: Destination, items: AlbumItem[], replyToId?: string) => {
+      this.albums.push({ items, replyToId });
+      return items.map(() => `${this.platform}-out-${++this.n}`);
+    };
   }
 }
 
@@ -164,6 +190,7 @@ async function setup() {
     logger: { info() {}, warn() {}, error() {} },
     echoDelayMs: 0,
     sleep: async () => undefined,
+    inline: true,
   });
   return { store, wa, tg, svc };
 }
@@ -536,9 +563,163 @@ describe("bridge migrations", () => {
     const { readFileSync } = await import("node:fs");
     const { sql } = await import("drizzle-orm");
     const db = await createTestDb();
-    for (const f of ["0006_bridge", "0007_bridge_v2"])
+    for (const f of ["0006_bridge", "0007_bridge_v2", "0008_bridge_queue"])
       for (const part of readFileSync(`drizzle/${f}.sql`, "utf8").split("--> statement-breakpoint"))
         await db.execute(sql.raw(part));
     expect(await new BridgeStore(db).rules()).toEqual([]);
+  });
+});
+
+describe("durable queue", () => {
+  it("delivers a job left in the queue by a previous process (rehydrated from its handle)", async () => {
+    const { store, tg, wa, svc } = await setup();
+    const ruleId = await store.addRule(rule({ dstTopicId: "" }));
+    wa.hydrate.set("m77", msg({ messageId: "m77", text: "survived a restart" }));
+    await store.enqueue({
+      kind: "send",
+      ruleId,
+      dedupeKey: `s:${ruleId}:whatsapp:g1@g.us:m77`,
+      payload: { platform: "whatsapp", chatId: "g1@g.us", messageId: "m77", ref: { id: "m77" } },
+    });
+    await store.claimDue(10); // the old process had picked it up, then died
+    await store.resetRunning(); // what a new process does first (BridgeService.start)
+    await svc.processDue();
+    expect(tg.sent).toHaveLength(1);
+    expect(tg.sent[0]?.out.text).toContain("survived a restart");
+    expect((await store.queueStats()).pending).toBe(0);
+  });
+
+  it("keeps a job that could not be delivered and retries it later; the same event never doubles", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    tg.failures.push(new Error("down"), new Error("down"), new Error("down"), new Error("down"));
+    await svc.handle(msg());
+    expect(tg.sent).toHaveLength(0);
+    expect(await store.queueStats()).toMatchObject({ pending: 1, failed: 0 });
+    // a duplicate event for the same message does not create a second job
+    await svc.handle(msg());
+    expect((await store.queueStats()).pending).toBe(1);
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 10_000 });
+    try {
+      await svc.processDue();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(tg.sent).toHaveLength(1);
+    expect((await store.queueStats()).pending).toBe(0);
+  });
+});
+
+describe("edits and deletions", () => {
+  it("mirrors an edit onto the copy, but never an edit of the copy itself", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(msg());
+    await svc.handleEdit(msg({ text: "hello (edited)" }), "t1");
+    expect(tg.edited).toEqual([
+      { messageId: "telegram-out-1", text: "Sara (+249111):\nhello (edited)" },
+    ]);
+    await svc.handleEdit(msg({ text: "again" }), "t1"); // same event twice
+    expect(tg.edited).toHaveLength(1);
+    // Telegram reports our own edit of the copy: must not bounce back
+    await svc.handleEdit(
+      msg({ platform: "telegram", chatId: "-100", messageId: "telegram-out-1", text: "x" }),
+      "t2",
+    );
+    expect(tg.edited).toHaveLength(1);
+  });
+
+  it("does not mirror edits when the rule says no", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule({ forwardEdits: false }));
+    await svc.handle(msg());
+    await svc.handleEdit(msg({ text: "changed" }), "t1");
+    expect(tg.edited).toHaveLength(0);
+  });
+
+  it("mirrors a deletion, even when the platform does not say which chat it came from", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(msg());
+    await svc.handle(msg({ messageId: "m2" }));
+    await svc.handleDelete("whatsapp", "g1@g.us", "m1");
+    expect(tg.removed).toEqual(["telegram-out-1"]);
+    await svc.handleDelete("whatsapp", undefined, "m2");
+    expect(tg.removed).toEqual(["telegram-out-1", "telegram-out-2"]);
+    await svc.handleDelete("whatsapp", undefined, "unrelated"); // nothing known: ignored
+    expect(tg.removed).toHaveLength(2);
+  });
+
+  it("does not delete when the rule says no", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule({ forwardDeletes: false }));
+    await svc.handle(msg());
+    await svc.handleDelete("whatsapp", "g1@g.us", "m1");
+    expect(tg.removed).toHaveLength(0);
+  });
+});
+
+describe("albums", () => {
+  const pic = (id: string, text = "") =>
+    msg({
+      messageId: id,
+      type: "image",
+      text,
+      albumId: "alb1",
+      downloadMedia: async () => `/tmp/${id}.jpg`,
+    });
+
+  it("sends members together as one album with the name and captions on the first item", async () => {
+    const { store, tg, svc } = await setup();
+    tg.withAlbums = true;
+    await store.addRule(rule());
+    await svc.handle(pic("p1", "first"));
+    await svc.handle(pic("p2", "second"));
+    expect(tg.sent).toHaveLength(0); // still waiting for the rest of the album
+    await svc.flushAlbums();
+    expect(tg.sent).toHaveLength(0);
+    expect(tg.albums).toHaveLength(1);
+    expect(tg.albums[0]?.items.map((i) => i.filePath)).toEqual(["/tmp/p1.jpg", "/tmp/p2.jpg"]);
+    expect(tg.albums[0]?.items[0]?.text).toBe("Sara (+249111):\nfirst\nsecond");
+    expect(tg.albums[0]?.items[1]?.text).toBe("");
+    // every member is linked, so edits/deletes/replies find their copy
+    expect(await store.copyOf("whatsapp", "g1@g.us", "p2", "-100")).toBeDefined();
+  });
+
+  it("sends one by one when the destination has no album support, name on the first only", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(pic("p1", "a"));
+    await svc.handle(pic("p2", "b"));
+    await svc.flushAlbums();
+    expect(tg.sent).toHaveLength(2);
+    expect(tg.sent[0]?.out.text).toContain("Sara");
+    expect(tg.sent[1]?.out.text).toBe("b");
+  });
+
+  it("a lone picture with an album id is just a normal message", async () => {
+    const { store, tg, svc } = await setup();
+    tg.withAlbums = true;
+    await store.addRule(rule());
+    await svc.handle(pic("solo", "x"));
+    await svc.flushAlbums();
+    expect(tg.albums).toHaveLength(0);
+    expect(tg.sent).toHaveLength(1);
+  });
+
+  it("falls back to one by one when the album send fails", async () => {
+    const { store, tg, svc } = await setup();
+    tg.withAlbums = true;
+    Object.defineProperty(tg, "sendAlbum", {
+      get: () => async () => {
+        throw new Error("album refused");
+      },
+    });
+    await store.addRule(rule());
+    await svc.handle(pic("p1"));
+    await svc.handle(pic("p2"));
+    await svc.flushAlbums();
+    expect(tg.sent).toHaveLength(2);
+    expect(svc.problems().some((p) => p.type === "album")).toBe(true);
   });
 });

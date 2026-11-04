@@ -89,6 +89,8 @@ export interface BaileysDeps {
   minSendGapMs: () => Promise<number>;
   /** Bridge tap: every message event (including the account's own), before the bot's own filtering. */
   onRawMessage?: (m: WAMessage) => void;
+  /** Bridge tap: message updates (edits and revocations arrive here). */
+  onRawUpdate?: (updates: { key: WAMessage["key"]; update: Partial<WAMessage> }[]) => void;
   namespace?: string;
   socketFactory?: (auth: AuthenticationState) => Promise<SocketLike>;
   /** Test hooks. */
@@ -184,6 +186,18 @@ export class BaileysProvider implements WhatsAppProvider {
       }
     }) as never);
 
+    if (this.deps.onRawUpdate) {
+      const tap = this.deps.onRawUpdate;
+      sock.ev.on("messages.update", ((
+        list: { key: WAMessage["key"]; update: Partial<WAMessage> }[],
+      ) => {
+        try {
+          tap(list);
+        } catch (err) {
+          this.deps.logger.error({ err: String(err) }, "bridge update tap failed");
+        }
+      }) as never);
+    }
     sock.ev.on("contacts.upsert", ((list: Contact[]) => this.noteContacts(list)) as never);
     sock.ev.on("contacts.update", ((list: Partial<Contact>[]) => this.noteContacts(list)) as never);
 
@@ -479,6 +493,59 @@ export class BaileysProvider implements WhatsAppProvider {
     return this.enqueue(async () => {
       const { raw: _raw, ...res } = await this.deliver(jid, content, quoteId);
       return res;
+    });
+  }
+
+  /** A message seen recently (kept for quoting); the bridge uses it to learn who edited a message. */
+  recentMessage(id: string): WAMessage | undefined {
+    return this.recent.get(id);
+  }
+
+  /** Bridge: deletes ("for everyone") a message this account sent. */
+  async deleteMessage(jid: string, id: string): Promise<boolean> {
+    const sock = this.sock;
+    if (!sock || this.status_.state !== "open") return false;
+    await sock.sendMessage(jid, {
+      delete: { remoteJid: jid, fromMe: true, id },
+    } as AnyMessageContent);
+    return true;
+  }
+
+  /** Bridge: sends pictures/videos as one WhatsApp album (a parent album message, then the children linked to it). */
+  sendAlbum(
+    jid: string,
+    items: { type: "image" | "video"; path: string; caption: string }[],
+    quoteId?: string,
+  ): Promise<string[]> {
+    return this.enqueue(async () => {
+      const parent = await this.deliver(
+        jid,
+        {
+          album: {
+            expectedImageCount: items.filter((i) => i.type === "image").length,
+            expectedVideoCount: items.filter((i) => i.type === "video").length,
+          },
+        } as unknown as AnyMessageContent,
+        quoteId,
+      );
+      if (!parent.confirmed || !parent.raw?.key) throw new Error(parent.error ?? "album not sent");
+      const ids: string[] = [];
+      for (const it of items) {
+        const content = (it.type === "image"
+          ? { image: { url: it.path }, caption: it.caption || undefined }
+          : {
+              video: { url: it.path },
+              caption: it.caption || undefined,
+            }) as unknown as AnyMessageContent;
+        const res = await this.deliver(jid, {
+          ...content,
+          albumParentKey: parent.raw.key,
+        } as unknown as AnyMessageContent);
+        if (!res.confirmed || !res.providerMessageId)
+          throw new Error(res.error ?? "album item not sent");
+        ids.push(res.providerMessageId);
+      }
+      return ids;
     });
   }
 

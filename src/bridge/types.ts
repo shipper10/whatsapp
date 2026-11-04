@@ -39,6 +39,10 @@ export interface BridgeMessage {
   contact?: { name: string; phone?: string };
   poll?: { question: string; options: string[] };
   replyToId?: string;
+  /** Shared by the pictures/videos sent together as one album. */
+  albumId?: string;
+  /** Serializable handle the source endpoint can turn back into this message after a restart. */
+  ref?: unknown;
   timestamp: number;
   fromMe: boolean;
   /** Downloads the media to a temp file (media types only). The caller removes the file. */
@@ -73,11 +77,27 @@ export interface ChatInfo {
 }
 
 /** What the bridge needs from each platform. */
+export interface AlbumItem {
+  type: "image" | "video";
+  filePath: string;
+  fileName?: string;
+  /** Caption of this item; Telegram keeps only the first one. */
+  text: string;
+}
+
 export interface BridgeEndpoint {
   readonly platform: Platform;
   ready(): boolean;
   send(dest: Destination, out: OutgoingBridge): Promise<string | undefined>;
   listChats(): Promise<ChatInfo[]>;
+  /** Rebuilds a message from the handle stored with a queued job (after a restart). */
+  rehydrate?(ref: unknown): Promise<BridgeMessage | null>;
+  /** Replaces the text/caption of a message we posted. False when the platform cannot do it. */
+  edit?(dest: Destination, messageId: string, out: OutgoingBridge): Promise<boolean>;
+  /** Deletes a message we posted. */
+  remove?(dest: Destination, messageId: string): Promise<boolean>;
+  /** Sends several pictures/videos as one album; returns the destination message ids in order. */
+  sendAlbum?(dest: Destination, items: AlbumItem[], replyToId?: string): Promise<string[]>;
 }
 
 export interface BridgeRule {
@@ -98,6 +118,9 @@ export interface BridgeRule {
   showPhone: boolean;
   /** Also forward messages written by the linked account itself. */
   forwardOwn: boolean;
+  /** Mirror edits and deletions of the source message onto its copy. */
+  forwardEdits: boolean;
+  forwardDeletes: boolean;
 }
 
 export const SENDER_MODES = ["profile", "saved", "custom", "none"] as const;
