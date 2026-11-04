@@ -102,7 +102,9 @@ export class BridgeService {
   }
 
   /** A message arrived that no mapper understands; shown in the dashboard instead of vanishing. */
-  noteUnrecognised(platform: Platform, chat: string, kinds: string[]) {
+  async noteUnrecognised(platform: Platform, chat: string, kinds: string[]) {
+    const rules = await this.deps.store.rules();
+    if (!rules.some((r) => r.srcPlatform === platform && r.srcChatId === chat)) return;
     this.seenMsg({
       at: new Date(),
       platform,
@@ -131,7 +133,10 @@ export class BridgeService {
     this.seen.add(first);
     if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.values().next().value as string);
 
-    const rules = matchRules(msg, await store.rules());
+    const allRules = await store.rules();
+    // Telegram delivers every chat the account is in; only chats used as a source in some rule are of interest.
+    if (!allRules.some((r) => r.srcPlatform === msg.platform && r.srcChatId === msg.chatId)) return;
+    const rules = matchRules(msg, allRules);
     this.seenMsg({
       at: new Date(),
       platform: msg.platform,

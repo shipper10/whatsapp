@@ -312,6 +312,15 @@ describe("BridgeService", () => {
     expect(tg.sent.at(-1)?.out.text).toContain("download timed out");
   });
 
+  it("ignores chats that no rule uses, and keeps them out of the activity list", async () => {
+    const { store, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(msg({ platform: "telegram", chatId: "-999", messageId: "n1" }));
+    expect(svc.activity()).toHaveLength(0);
+    await svc.handle(msg({ messageId: "n2", type: "image" }));
+    expect(svc.activity()[0]?.type).toBe("image");
+  });
+
   it("never forwards a bare name header for an empty text message", async () => {
     const { store, tg, svc } = await setup();
     await store.addRule(rule());
@@ -320,8 +329,11 @@ describe("BridgeService", () => {
   });
 
   it("lists content it does not recognise", async () => {
-    const { svc } = await setup();
-    svc.noteUnrecognised("whatsapp", "g1@g.us", ["albumMessage"]);
+    const { store, svc } = await setup();
+    await svc.noteUnrecognised("whatsapp", "g1@g.us", ["albumMessage"]);
+    expect(svc.activity()).toHaveLength(0); // no rule uses this chat: not of interest
+    await store.addRule(rule());
+    await svc.noteUnrecognised("whatsapp", "g1@g.us", ["albumMessage"]);
     expect(svc.activity()[0]?.type).toContain("albumMessage");
   });
 
