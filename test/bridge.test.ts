@@ -304,6 +304,14 @@ describe("BridgeService", () => {
     expect(stages).toContain("send");
   });
 
+  it("turns a hanging download into a visible error", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    (svc as unknown as { deps: { downloadTimeoutMs: number } }).deps.downloadTimeoutMs = 20;
+    await svc.handle(msg({ type: "image", downloadMedia: () => new Promise<string>(() => {}) }));
+    expect(tg.sent.at(-1)?.out.text).toContain("download timed out");
+  });
+
   it("retries after a FloodWait and then succeeds", async () => {
     const { store, tg, svc } = await setup();
     await store.addRule(rule());
@@ -390,6 +398,8 @@ describe("bridge dashboard", () => {
     expect(p1.body).toContain("page 1 / 3");
     const kind = await get("kw=community");
     expect(kind.body).not.toContain("Batch 5<");
+    expect(p1.body).toContain("Recent problems");
+    expect(p1.body).toContain("Recent messages seen");
     const edit = await get(`edit=${id}`);
     expect(edit.body).toContain(`Edit rule #${id}`);
     const post = (sub: string, body: string) => {

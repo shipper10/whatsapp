@@ -249,6 +249,7 @@ if (env.BRIDGE_ENABLED && baileys) {
     status: () => ({ whatsapp: wa.ready(), telegram: !!bridgeTelegram?.ready() }),
     refresh: () => svc.refreshChats(),
     problems: () => svc.problems(),
+    activity: () => svc.activity(),
   });
 }
 

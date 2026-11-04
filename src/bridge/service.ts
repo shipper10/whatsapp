@@ -24,6 +24,8 @@ export interface BridgeDeps {
   /** Own-account messages arrive as events slightly before we have recorded the send; wait before judging them. */
   echoDelayMs?: number;
   maxMediaBytes?: number;
+  downloadTimeoutMs?: number;
+  uploadTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -35,10 +37,34 @@ export interface BridgeProblem {
   error: string;
 }
 
+export interface BridgeActivity {
+  at: Date;
+  platform: Platform;
+  chat: string;
+  type: string;
+  fromMe: boolean;
+  /** Number of rules that matched; 0 means nothing was forwarded. */
+  rules: number;
+  note?: string;
+}
+
 const short = (err: unknown) =>
   String((err as Error)?.message ?? err)
     .replace(/\s+/g, " ")
     .slice(0, 200);
+
+/** A stuck download or upload must surface as an error instead of silently hanging the message forever. */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let t: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    t = setTimeout(
+      () => reject(new Error(`${what} timed out after ${Math.round(ms / 1000)}s`)),
+      ms,
+    );
+    t.unref?.();
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+}
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const SEEN_MAX = 5000;
@@ -58,6 +84,7 @@ export class BridgeService {
   /** Sends in progress per destination chat; an own-account event for that chat may be the echo of one. */
   private readonly inflight = new Map<string, number>();
   private readonly problems_: BridgeProblem[] = [];
+  private readonly activity_: BridgeActivity[] = [];
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly deps: BridgeDeps) {
@@ -67,6 +94,16 @@ export class BridgeService {
   /** The last few failures, newest first, so the dashboard can show why something did not arrive. */
   problems(): BridgeProblem[] {
     return [...this.problems_].reverse();
+  }
+
+  /** The last messages the bridge saw (even ones no rule matched), newest first: shows whether a type reaches it at all. */
+  activity(): BridgeActivity[] {
+    return [...this.activity_].reverse();
+  }
+
+  private seenMsg(a: BridgeActivity) {
+    this.activity_.push(a);
+    if (this.activity_.length > 30) this.activity_.shift();
   }
 
   private note(p: BridgeProblem) {
@@ -83,6 +120,14 @@ export class BridgeService {
     if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.values().next().value as string);
 
     const rules = matchRules(msg, await store.rules());
+    this.seenMsg({
+      at: new Date(),
+      platform: msg.platform,
+      chat: msg.chatTitle || msg.chatId,
+      type: msg.type,
+      fromMe: msg.fromMe,
+      rules: rules.length,
+    });
     if (rules.length === 0) return;
 
     // Loop prevention: a message the bridge itself posted must never be forwarded again.
@@ -105,7 +150,11 @@ export class BridgeService {
         ["application/x-tgsticker", "video/webm"].includes(msg.mimeType ?? "");
       if (isMediaType(msg.type) && msg.downloadMedia && !animatedSticker) {
         try {
-          mediaPath = await msg.downloadMedia(dir);
+          mediaPath = await withTimeout(
+            msg.downloadMedia(dir),
+            this.deps.downloadTimeoutMs ?? 90_000,
+            "download",
+          );
         } catch (err) {
           downloadError = short(err);
           this.note({
@@ -228,7 +277,11 @@ export class BridgeService {
   ) {
     for (let attempt = 0; ; attempt++) {
       try {
-        const id = await dst.send(dest, out);
+        const id = await withTimeout(
+          dst.send(dest, out),
+          out.filePath ? (this.deps.uploadTimeoutMs ?? 300_000) : 60_000,
+          "send",
+        );
         if (id)
           await this.deps.store.addLink({
             platform: rule.dstPlatform,

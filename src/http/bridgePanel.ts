@@ -17,6 +17,14 @@ export interface BridgeUiDeps {
   status: () => { whatsapp: boolean; telegram: boolean };
   refresh: () => Promise<{ platform: Platform; count: number }[]>;
   /** Recent forwarding failures (newest first). */
+  activity?: () => {
+    at: Date;
+    platform: Platform;
+    chat: string;
+    type: string;
+    fromMe: boolean;
+    rules: number;
+  }[];
   problems?: () => { at: Date; platform: Platform; type: string; stage: string; error: string }[];
 }
 
@@ -163,6 +171,14 @@ function render(
   editing: BridgeRule | undefined,
   flash?: { text: string; err?: boolean },
   problems: { at: Date; platform: Platform; type: string; stage: string; error: string }[] = [],
+  activity: {
+    at: Date;
+    platform: Platform;
+    chat: string;
+    type: string;
+    fromMe: boolean;
+    rules: number;
+  }[] = [],
 ) {
   const all = [...chats.whatsapp, ...chats.telegram];
   const labelOf = (v: string | undefined) => {
@@ -210,17 +226,24 @@ ${editing ? `<input type="hidden" name="edit" value="${editing.id}">` : `<p><lab
     `<h1>WhatsApp ⇄ Telegram bridge</h1>
 ${flash ? `<div class="flash${flash.err ? " err" : ""}">${esc(flash.text)}</div>` : ""}
 <div class="card"><h2>Rules</h2><table>${ruleRows || '<tr><td class="muted">no rules yet</td></tr>'}</table></div>
-${
-  problems.length
-    ? `<div class="card"><h2>Recent problems</h2><table>${problems
+<div class="card"><h2>Recent problems</h2><table>${
+      problems
         .slice(0, 10)
         .map(
           (p) =>
             `<tr><td class="muted" style="white-space:nowrap">${p.at.toISOString().slice(11, 19)} UTC</td><td>${esc(p.type)} → ${LABEL[p.platform]} (${esc(p.stage)})</td><td class="bad">${esc(p.error)}</td></tr>`,
         )
-        .join("")}</table></div>`
-    : ""
-}
+        .join("") || '<tr><td class="muted">none since the last restart</td></tr>'
+    }</table></div>
+<div class="card"><h2>Recent messages seen</h2><table>${
+      activity
+        .slice(0, 12)
+        .map(
+          (a) =>
+            `<tr><td class="muted" style="white-space:nowrap">${a.at.toISOString().slice(11, 19)} UTC</td><td>${LABEL[a.platform]}: ${esc(a.chat)}</td><td>${esc(a.type)}${a.fromMe ? " (mine)" : ""}</td><td class="${a.rules ? "ok" : "muted"}">${a.rules ? `${a.rules} rule(s)` : "no rule matched"}</td></tr>`,
+        )
+        .join("") || '<tr><td class="muted">nothing yet since the last restart</td></tr>'
+    }</table></div>
 ${builder}
 <form method="post" action="${here}/refresh"><p><button>Refresh chat lists</button></p></form>
 ${chatTable("whatsapp", chats.whatsapp, s, st.whatsapp)}${chatTable("telegram", chats.telegram, s, st.telegram)}`,
