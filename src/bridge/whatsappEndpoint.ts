@@ -200,6 +200,8 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
     const kinds = Object.keys(
       (normalizeMessageContent(m.message) as object | undefined) ?? {},
     ).filter((k) => !IGNORED_KINDS.has(k));
+    if (!m.message && m.key?.remoteJid)
+      kinds.push(`no content (stub ${m.messageStubType ?? "none"})`);
     if (kinds.length && m.key?.remoteJid && !m.key.remoteJid.endsWith("@broadcast"))
       this.onUnrecognised?.(m.key.remoteJid, kinds);
   };
