@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { stickerToPng } from "./convert.js";
 import { buildOutgoing, isMediaType, matchRules } from "./engine.js";
 import type { BridgeStore } from "./store.js";
 import type {
@@ -163,9 +164,7 @@ export class BridgeService {
       `bridge-${msg.platform}-${msg.messageId}`.replace(/[^\w.-]/g, "_"),
     );
     try {
-      const animatedSticker =
-        msg.type === "sticker" &&
-        ["application/x-tgsticker", "video/webm"].includes(msg.mimeType ?? "");
+      const animatedSticker = msg.type === "sticker" && msg.mimeType === "application/x-tgsticker";
       if (isMediaType(msg.type) && msg.downloadMedia && !animatedSticker) {
         try {
           mediaPath = await withTimeout(
@@ -251,31 +250,21 @@ export class BridgeService {
     }
     const dest = { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined };
     const key = `${rule.dstPlatform}:${rule.dstChatId}`;
-    const stickerHead = out.type === "sticker" && out.filePath && out.text ? out.text : "";
-    if (stickerHead) out = { ...out, text: "" };
     this.inflight.set(key, (this.inflight.get(key) ?? 0) + 1);
     try {
-      if (stickerHead)
-        await this.sendWithRetry(dst, dest, { type: "text", text: stickerHead }, msg, rule);
       try {
-        await this.sendWithRetry(dst, dest, out, msg, rule);
+        if (out.filePath && out.type !== "text") await this.sendMedia(dst, dest, out, msg, rule);
+        else await this.sendWithRetry(dst, dest, out, msg, rule);
       } catch (err) {
         if (out.type === "text") throw err;
-        // The destination refused this file: leave a note with the reason instead of dropping it silently.
-        this.note({
-          at: new Date(),
-          platform: rule.dstPlatform,
-          type: out.type,
-          stage: "send",
-          error: short(err),
-        });
+        // Every way of sending this failed: leave a note with the reason instead of dropping it silently.
         this.deps.logger.warn(
           { err: String(err), type: out.type },
           "bridge: file not accepted, sending a note",
         );
         const text =
           out.type === "sticker"
-            ? `[sticker ${msg.text}]`.trim()
+            ? `${rule.senderMode === "none" ? "" : `${out.text}\n`}[sticker ${msg.text}]`.trim()
             : `${out.text}\n[${out.type} could not be sent: ${short(err)}]`.trim();
         await this.sendWithRetry(dst, dest, { type: "text", text }, msg, rule);
       }
@@ -284,6 +273,68 @@ export class BridgeService {
       if (n <= 0) this.inflight.delete(key);
       else this.inflight.set(key, n);
     }
+  }
+
+  /**
+   * Sends a file, trying the next-best form when the destination refuses it:
+   * stickers go as pictures (Telegram never gets a native sticker), anything else falls back to a plain document.
+   */
+  private async sendMedia(
+    dst: BridgeEndpoint,
+    dest: { chatId: string; topicId?: string },
+    out: OutgoingBridge,
+    msg: BridgeMessage,
+    rule: BridgeRule,
+  ) {
+    const file = out.filePath as string;
+    const head = out.text;
+    let headSent = false;
+    const asDocument = (caption: string): OutgoingBridge => ({
+      ...out,
+      type: "document",
+      text: caption,
+      fileName: out.fileName ?? basename(file),
+    });
+    const steps: (() => Promise<OutgoingBridge>)[] = [];
+    if (out.type === "sticker") {
+      if (rule.dstPlatform !== "telegram")
+        steps.push(async () => {
+          if (head && !headSent) {
+            await this.sendWithRetry(dst, dest, { type: "text", text: head }, msg, rule);
+            headSent = true;
+          }
+          return { ...out, text: "" };
+        });
+      steps.push(async () => ({
+        type: "image",
+        text: headSent ? "" : head,
+        filePath: await stickerToPng(file),
+        fileName: "sticker.png",
+        mimeType: "image/png",
+        replyToId: out.replyToId,
+      }));
+      steps.push(async () => asDocument(headSent ? "" : head));
+    } else {
+      steps.push(async () => out);
+      if (out.type !== "document") steps.push(async () => asDocument(head));
+    }
+    let first: unknown;
+    for (const step of steps) {
+      try {
+        await this.sendWithRetry(dst, dest, await step(), msg, rule);
+        return;
+      } catch (err) {
+        first ??= err;
+        this.note({
+          at: new Date(),
+          platform: rule.dstPlatform,
+          type: out.type,
+          stage: "send",
+          error: short(err),
+        });
+      }
+    }
+    throw first;
   }
 
   private async sendWithRetry(

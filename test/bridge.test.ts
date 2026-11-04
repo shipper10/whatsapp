@@ -1,4 +1,6 @@
+import { mkdir } from "node:fs/promises";
 import { Readable } from "node:stream";
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { buildOutgoing, matchRules } from "../src/bridge/engine.js";
 import { BridgeService } from "../src/bridge/service.js";
@@ -14,6 +16,17 @@ import type {
 import { MESSAGE_TYPES } from "../src/bridge/types.js";
 import { createBridgeUi } from "../src/http/bridgePanel.js";
 import { createTestDb } from "./helpers/pg.js";
+
+/** A real WebP file, like a sticker. */
+async function makeWebp(name: string): Promise<string> {
+  const dir = `./tmp/test-${name}`;
+  await mkdir(dir, { recursive: true });
+  const path = `${dir}/s.webp`;
+  await sharp({ create: { width: 8, height: 8, channels: 4, background: "#ff0000" } })
+    .webp()
+    .toFile(path);
+  return path;
+}
 
 const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   id: 1,
@@ -224,31 +237,76 @@ describe("BridgeService", () => {
     expect(tg.sent[0]?.out.text).toContain("could not be transferred");
   });
 
-  it("sends the sender line separately and falls back to a note when a sticker is refused", async () => {
+  it("sends WhatsApp stickers to Telegram as pictures, with the sender as caption", async () => {
     const { store, tg, svc } = await setup();
     await store.addRule(rule());
-    await svc.handle(
-      msg({ type: "sticker", text: "😀", downloadMedia: async () => "/tmp/s.webp" }),
-    );
-    expect(tg.sent.map((x) => x.out.type)).toEqual(["text", "sticker"]);
-    expect(tg.sent[1]?.out.text).toBe("");
-    // a refused sticker still leaves a note
-    const { store: st2, tg: tg2, svc: svc2 } = await setup();
-    await st2.addRule(rule());
-    const origSend = tg2.send.bind(tg2);
-    tg2.send = async (d, o) => {
-      if (o.type === "sticker") throw new Error("bad format");
-      return origSend(d, o);
-    };
-    await svc2.handle(
-      msg({
-        messageId: "s2",
-        type: "sticker",
-        text: "😀",
-        downloadMedia: async () => "/tmp/s.webp",
+    const dl = () => makeWebp("wa-st");
+    await svc.handle(msg({ type: "sticker", text: "", downloadMedia: dl }));
+    expect(tg.sent.map((x) => x.out.type)).toEqual(["image"]);
+    expect(tg.sent[0]?.out.filePath?.endsWith("sticker.png")).toBe(true);
+    expect(tg.sent[0]?.out.text).toBe("Sara (+249111):");
+  });
+
+  it("sends Telegram stickers natively to WhatsApp, then as a picture, then as a document", async () => {
+    const { store, wa, svc } = await setup();
+    await store.addRule(
+      rule({
+        srcPlatform: "telegram",
+        srcChatId: "-100",
+        srcTopicId: "",
+        dstPlatform: "whatsapp",
+        dstChatId: "g1@g.us",
+        dstTopicId: "",
       }),
     );
-    expect(tg2.sent.at(-1)?.out.text).toContain("[sticker 😀]");
+    const tgMsg = (id: string) =>
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        messageId: id,
+        type: "sticker",
+        text: "😀",
+        downloadMedia: () => makeWebp(id),
+      });
+    await svc.handle(tgMsg("a1"));
+    expect(wa.sent.map((x) => x.out.type)).toEqual(["text", "sticker"]);
+    // WhatsApp refuses the sticker -> picture
+    const orig = wa.send.bind(wa);
+    wa.send = async (d, o) => {
+      if (o.type === "sticker") throw new Error("sticker refused");
+      return orig(d, o);
+    };
+    wa.sent.length = 0;
+    await svc.handle(tgMsg("a2"));
+    expect(wa.sent.map((x) => x.out.type)).toEqual(["text", "image"]);
+    // and when pictures fail too, the original file goes as a document
+    wa.send = async (d, o) => {
+      if (o.type === "sticker" || o.type === "image") throw new Error("refused");
+      return orig(d, o);
+    };
+    wa.sent.length = 0;
+    await svc.handle(tgMsg("a3"));
+    expect(wa.sent.map((x) => x.out.type)).toEqual(["text", "document"]);
+  });
+
+  it("falls back to a document when a video is refused, and to a note when everything fails", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    const orig = tg.send.bind(tg);
+    tg.send = async (d, o) => {
+      if (o.type === "video") throw new Error("bad video");
+      return orig(d, o);
+    };
+    await svc.handle(msg({ type: "video", downloadMedia: async () => "/tmp/v.mp4" }));
+    expect(tg.sent.map((x) => x.out.type)).toEqual(["document"]);
+    tg.send = async (_d, o) => {
+      if (o.type !== "text") throw new Error("nothing works");
+      return orig(_d, o);
+    };
+    await svc.handle(
+      msg({ messageId: "v2", type: "video", downloadMedia: async () => "/tmp/v.mp4" }),
+    );
+    expect(tg.sent.at(-1)?.out.text).toContain("video could not be sent: nothing works");
   });
 
   it("does not try to download animated Telegram stickers for WhatsApp", async () => {

@@ -228,7 +228,14 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
     } else if (out.filePath) {
       const size = (await stat(out.filePath)).size;
       const source = { url: out.filePath };
-      if (out.type === "voice") {
+      if (out.type === "document") {
+        content = {
+          document: source,
+          mimetype: out.mimeType ?? "application/octet-stream",
+          fileName: out.fileName ?? out.filePath.split("/").pop() ?? "file",
+          caption: out.text || undefined,
+        };
+      } else if (out.type === "voice") {
         content = { audio: source, mimetype: "audio/ogg; codecs=opus", ptt: true };
       } else if (out.type === "sticker") {
         content = { sticker: source };
