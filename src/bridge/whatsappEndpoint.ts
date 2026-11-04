@@ -68,11 +68,7 @@ export function whatsappToBridge(
   let poll: BridgeMessage["poll"];
   let ctx: { stanzaId?: string } | undefined;
 
-  if (c.conversation !== undefined || c.extendedTextMessage) {
-    type = "text";
-    text = c.conversation ?? c.extendedTextMessage?.text ?? "";
-    ctx = c.extendedTextMessage?.contextInfo;
-  } else if (c.imageMessage) {
+  if (c.imageMessage) {
     type = "image";
     text = c.imageMessage.caption ?? "";
     mimeType = c.imageMessage.mimetype;
@@ -125,6 +121,11 @@ export function whatsappToBridge(
       question: p.name ?? "",
       options: (p.options ?? []).map((o: { optionName?: string }) => o.optionName ?? ""),
     };
+  } else if (c.conversation !== undefined || c.extendedTextMessage) {
+    // Text goes last: a media message must never be mistaken for an empty text.
+    type = "text";
+    text = c.conversation ?? c.extendedTextMessage?.text ?? "";
+    ctx = c.extendedTextMessage?.contextInfo;
   }
   if (!type) return null;
 
@@ -194,6 +195,10 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
       (jids) => this.wa.savedNameOf(...jids),
     );
     if (msg) {
+      if (msg.type === "text" && !msg.text.trim() && msg.chatId) {
+        const keys = Object.keys((normalizeMessageContent(m.message) as object | undefined) ?? {});
+        this.onUnrecognised?.(msg.chatId, [`empty text`, ...keys]);
+      }
       void this.onMessage(msg).catch(this.onError);
       return;
     }

@@ -69,3 +69,18 @@ describe("WhatsApp -> bridge mapping", () => {
     ).toEqual(["a"]);
   });
 });
+
+describe("media is never mistaken for text", () => {
+  it("prefers the media kind when a message also carries text fields", () => {
+    const m = conv(
+      base({
+        extendedTextMessage: { text: "" },
+        imageMessage: { mimetype: "image/jpeg", caption: "cap" },
+      }),
+    );
+    expect(m?.type).toBe("image");
+    expect(m?.text).toBe("cap");
+    const n = conv(base({ conversation: "", imageMessage: { mimetype: "image/png" } }));
+    expect(n?.type).toBe("image");
+  });
+});
