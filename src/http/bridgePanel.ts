@@ -1,6 +1,7 @@
 import type { IncomingMessage as HttpReq } from "node:http";
 import QRCode from "qrcode";
 import type { AccountManager } from "../bridge/accounts.js";
+import { ANY_TOPIC, contactRef, PRIVATE_CHATS } from "../bridge/engine.js";
 import type { BridgeStore, NewRule } from "../bridge/store.js";
 import {
   MESSAGE_TYPES,
@@ -242,6 +243,14 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
     return { redirect: back };
   };
 
+  /** The settings every reply path (Telegram topic -> the WhatsApp person) uses. */
+  const reversePart = (src: Ref) => ({
+    senderMode: "none" as SenderMode,
+    forwardOwn: true,
+    types: [...MESSAGE_TYPES] as MessageType[],
+    dstAccountId: src.accountId,
+  });
+
   const saveRule = async (form: URLSearchParams): Promise<BridgeUiResult> => {
     const editId = Number(form.get("edit")) || undefined;
     const back = new URLSearchParams();
@@ -269,18 +278,36 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
     if (senderMode === "custom" && !customName)
       return again("Type the fixed name, or pick another sender option.");
 
+    const priv = src.chatId === PRIVATE_CHATS;
+    if (priv) {
+      if (src.platform !== "whatsapp" || dst.platform !== "telegram")
+        return again("“All private chats” goes from WhatsApp to a Telegram group.");
+      const g = (await store.allChats()).find(
+        (c) =>
+          c.platform === "telegram" &&
+          (c.accountId ?? 0) === dst.accountId &&
+          c.chatId === dst.chatId &&
+          !c.topicId,
+      );
+      if (!g || g.kind !== "forum" || dst.topicId)
+        return again(
+          "Pick the Telegram group itself under “To” — it must be a group with Topics turned on (refresh the chat lists if it is missing).",
+        );
+    }
     const all = await store.allChats();
-    const title = (x: Ref) => findChat(all, x)?.title ?? x.chatId;
+    const title = (x: Ref) =>
+      x.chatId === PRIVATE_CHATS ? "All private chats" : (findChat(all, x)?.title ?? x.chatId);
     const base = {
       enabled: true,
       types,
-      senderMode,
+      senderMode: priv ? ("none" as SenderMode) : senderMode,
       customName,
       showPhone: form.get("showPhone") === "1",
       forwardOwn: form.get("forwardOwn") === "1",
       forwardEdits: form.get("forwardEdits") === "1",
       forwardDeletes: form.get("forwardDeletes") === "1",
       logEnabled: form.get("logEnabled") === "1",
+      forwardReactions: form.get("forwardReactions") === "1",
     };
     const mk = (a: Ref, b: Ref): NewRule => ({
       ...base,
@@ -298,9 +325,26 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
       const cur = await store.rule(editId);
       if (!cur) return { ...NOT_FOUND };
       await store.updateRule(editId, { ...mk(src, dst), enabled: cur.enabled });
+      if (priv) {
+        const reply = (await store.rules()).find((r) => r.dstChatId === contactRef(editId));
+        if (reply)
+          await store.updateRule(reply.id, {
+            ...mk(dst, { ...src, chatId: contactRef(editId), topicId: "" }),
+            srcTopicId: ANY_TOPIC,
+            ...reversePart(src),
+            enabled: reply.enabled,
+          });
+      }
       return { redirect: `${here}/rules/${editId}` };
     }
     const id = await store.addRule(mk(src, dst));
+    if (priv && form.get("twoWay") === "1")
+      await store.addRule({
+        ...mk(dst, { ...src, chatId: contactRef(id), topicId: "" }),
+        srcTopicId: ANY_TOPIC,
+        ...reversePart(src),
+        name: `↩ ${title(dst)} → WhatsApp (reply path of rule #${id})`,
+      });
     if (form.get("direction") === "both") await store.addRule(mk(dst, src));
     return { redirect: `${here}/rules/${id}` };
   };

@@ -285,10 +285,34 @@ export const bridgeRules = pgTable("bridge_rules", {
   /** Keep a per-rule log of what happened to each message. */
   logEnabled: boolean("log_enabled").notNull().default(true),
   /** Which linked account the chats belong to. 0 = the main account (library bot's WhatsApp / env Telegram session). */
+  /** Mirror reactions between a message and its copy. */
+  forwardReactions: boolean("forward_reactions").notNull().default(true),
   srcAccountId: integer("src_account_id").notNull().default(0),
   dstAccountId: integer("dst_account_id").notNull().default(0),
   createdAt: now(),
 });
+
+/**
+ * "All private chats" rules: one Telegram topic per person. The topic is created on the person's first message and
+ * reused afterwards; messages typed in the topic go back to that person.
+ */
+export const bridgeContactTopics = pgTable(
+  "bridge_contact_topics",
+  {
+    id: serial("id").primaryKey(),
+    /** The "private chats" rule that created the topic. */
+    ruleId: integer("rule_id").notNull(),
+    peerChatId: text("peer_chat_id").notNull(),
+    peerName: text("peer_name").notNull().default(""),
+    dstChatId: text("dst_chat_id").notNull(),
+    topicId: text("topic_id").notNull(),
+    createdAt: now(),
+  },
+  (t) => [
+    uniqueIndex("bridge_contact_topics_peer_uq").on(t.ruleId, t.peerChatId),
+    index("bridge_contact_topics_topic_idx").on(t.dstChatId, t.topicId),
+  ],
+);
 
 /** Extra WhatsApp / Telegram accounts linked from the dashboard. Telegram sessions are stored encrypted. */
 export const bridgeAccounts = pgTable("bridge_accounts", {

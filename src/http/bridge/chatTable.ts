@@ -1,3 +1,4 @@
+import { PRIVATE_CHATS } from "../../bridge/engine.js";
 import type { ChatInfo, Platform } from "../../bridge/types.js";
 import { esc } from "../ui.js";
 import { HERE, LABEL, pager, ref } from "./shared.js";
@@ -60,11 +61,19 @@ export function chatTable(opts: {
     })
     .join("");
   const cols = opts.pick ? 3 : 2;
+  const allPrivate =
+    opts.pick && p === "whatsapp" && cur === 1 && !q && !kind
+      ? (() => {
+          const r = ref(p, PRIVATE_CHATS, "", opts.accountId);
+          const on = opts.pick?.src === r;
+          return `<tr><td><b>👤 All private chats</b><br><span class="muted">every new person gets their own topic in a Telegram group</span></td><td><span class="badge ok">special</span></td><td style="white-space:nowrap"><a class="btn sm${on ? "" : " ghost"}" href="${esc(opts.pick?.link("src", r))}">${on ? "✔ " : ""}From</a></td></tr>`;
+        })()
+      : "";
   return `<details class="card"${opts.open === false ? "" : " open"} id="${k}"><summary>${LABEL[p]}${opts.label ? ` · ${esc(opts.label)}` : ""} chats <span class="badge ${opts.connected ? "ok" : "bad"}">${opts.connected ? "connected" : "not connected"}</span><span class="muted">${chats.length} total</span></summary>
 <form method="get" action="${HERE}${path}#${k}" class="row">${hidden}
 <input name="q${k}" value="${esc(q)}" placeholder="Search name or id…">
 <select name="k${k}"><option value="">All types</option>${kinds.map((x) => `<option${x === kind ? " selected" : ""}>${esc(x)}</option>`).join("")}</select>
 <button>Search</button></form>
-<div class="scroll"><table><tr><th>Name</th><th>Type</th>${opts.pick ? "<th></th>" : ""}</tr>${body || `<tr><td colspan="${cols}" class="muted">no chats match — press “Refresh chat lists” on the Chats page if this is empty</td></tr>`}</table></div>
+<div class="scroll"><table><tr><th>Name</th><th>Type</th>${opts.pick ? "<th></th>" : ""}</tr>${allPrivate}${body || `<tr><td colspan="${cols}" class="muted">no chats match — press “Refresh chat lists” on the Chats page if this is empty</td></tr>`}</table></div>
 ${pager(`${HERE}${path}`, query, `p${k}`, cur, pages, rows.length)}</details>`;
 }

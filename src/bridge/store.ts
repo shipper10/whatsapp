@@ -1,6 +1,14 @@
 import { and, asc, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.js";
-import { bridgeChats, bridgeJobs, bridgeLinks, bridgeLogs, bridgeRules } from "../db/schema.js";
+import {
+  bridgeChats,
+  bridgeContactTopics,
+  bridgeJobs,
+  bridgeLinks,
+  bridgeLogs,
+  bridgeRules,
+} from "../db/schema.js";
+import { contactRef } from "./engine.js";
 import {
   type BridgeRule,
   type ChatInfo,
@@ -44,6 +52,7 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   forwardEdits: r.forwardEdits,
   forwardDeletes: r.forwardDeletes,
   logEnabled: r.logEnabled,
+  forwardReactions: r.forwardReactions,
   srcAccountId: r.srcAccountId,
   dstAccountId: r.dstAccountId,
 });
@@ -78,8 +87,68 @@ export class BridgeStore {
   }
 
   async deleteRule(id: number) {
-    await this.db.delete(bridgeRules).where(eq(bridgeRules.id, id));
-    await this.db.delete(bridgeLogs).where(eq(bridgeLogs.ruleId, id));
+    // A "private chats" rule owns its reply rule (topic -> person) and its topic map.
+    const owned = (await this.rules())
+      .filter((r) => r.dstChatId === contactRef(id))
+      .map((r) => r.id);
+    for (const rid of [id, ...owned]) {
+      await this.db.delete(bridgeRules).where(eq(bridgeRules.id, rid));
+      await this.db.delete(bridgeLogs).where(eq(bridgeLogs.ruleId, rid));
+    }
+    await this.db.delete(bridgeContactTopics).where(eq(bridgeContactTopics.ruleId, id));
+  }
+
+  // ---- "all private chats" rules: one topic per person
+
+  async contactTopic(ruleId: number, peerChatId: string) {
+    const [r] = await this.db
+      .select()
+      .from(bridgeContactTopics)
+      .where(
+        and(eq(bridgeContactTopics.ruleId, ruleId), eq(bridgeContactTopics.peerChatId, peerChatId)),
+      );
+    return r;
+  }
+
+  /** Which person a topic belongs to (for messages typed in the topic). */
+  async contactOfTopic(ruleId: number, dstChatId: string, topicId: string) {
+    const [r] = await this.db
+      .select()
+      .from(bridgeContactTopics)
+      .where(
+        and(
+          eq(bridgeContactTopics.ruleId, ruleId),
+          eq(bridgeContactTopics.dstChatId, dstChatId),
+          eq(bridgeContactTopics.topicId, topicId),
+        ),
+      );
+    return r;
+  }
+
+  async addContactTopic(t: {
+    ruleId: number;
+    peerChatId: string;
+    peerName: string;
+    dstChatId: string;
+    topicId: string;
+  }) {
+    await this.db.insert(bridgeContactTopics).values(t).onConflictDoNothing();
+    return (await this.contactTopic(t.ruleId, t.peerChatId)) as NonNullable<
+      Awaited<ReturnType<BridgeStore["contactTopic"]>>
+    >;
+  }
+
+  async contactTopics(ruleId: number) {
+    return this.db
+      .select()
+      .from(bridgeContactTopics)
+      .where(eq(bridgeContactTopics.ruleId, ruleId))
+      .orderBy(desc(bridgeContactTopics.id));
+  }
+
+  /** The topic no longer exists on Telegram: forget it so the next message makes a new one. */
+  async dropContactTopic(id: number) {
+    await this.db.delete(bridgeContactTopics).where(eq(bridgeContactTopics.id, id));
   }
 
   /** An account was removed: its chats leave the tables and the rules that used it stop (they are kept, not deleted). */
@@ -300,7 +369,12 @@ export class BridgeStore {
   /** Reverse lookup: a reply to a bridged message points at the original on the other platform. */
   async originalOf(platform: Platform, chatId: string, messageId: string) {
     const rows = await this.db
-      .select({ id: bridgeLinks.srcMessageId, chatId: bridgeLinks.srcChatId })
+      .select({
+        id: bridgeLinks.srcMessageId,
+        chatId: bridgeLinks.srcChatId,
+        platform: bridgeLinks.srcPlatform,
+        ruleId: bridgeLinks.ruleId,
+      })
       .from(bridgeLinks)
       .where(
         and(
@@ -371,6 +445,16 @@ export class BridgeStore {
       .onConflictDoNothing()
       .returning({ id: bridgeJobs.id });
     return rows.length > 0;
+  }
+
+  /** Status of the job with this key (pending/running/done/failed), if any. */
+  async jobState(dedupeKey: string): Promise<string | undefined> {
+    const [r] = await this.db
+      .select({ status: bridgeJobs.status })
+      .from(bridgeJobs)
+      .where(eq(bridgeJobs.dedupeKey, dedupeKey))
+      .limit(1);
+    return r?.status;
   }
 
   /** Takes the oldest due jobs and marks them running. */
@@ -465,7 +549,7 @@ export class BridgeStore {
   }
 }
 
-export type JobKind = "send" | "album" | "edit" | "delete";
+export type JobKind = "send" | "album" | "edit" | "delete" | "react";
 
 export interface JobRow {
   id: number;

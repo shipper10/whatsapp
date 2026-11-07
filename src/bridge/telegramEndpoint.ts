@@ -1,12 +1,19 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Api, TelegramClient } from "teleproto";
-import { DeletedMessage, EditedMessage, NewMessage, type NewMessageEvent } from "teleproto/events";
+import {
+  DeletedMessage,
+  EditedMessage,
+  NewMessage,
+  type NewMessageEvent,
+  Raw,
+} from "teleproto/events";
 import { StringSession } from "teleproto/sessions";
 import type {
   AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
+  BridgeReaction,
   ChatInfo,
   Destination,
   MessageType,
@@ -56,6 +63,8 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
   readonly platform = "telegram" as const;
   private client: TelegramClient | null = null;
   private started = false;
+  /** Last known reactors per message, to tell who added or removed a reaction. */
+  private readonly seenReactions = new Map<string, Map<string, string>>();
 
   constructor(
     private readonly cfg: TelegramBridgeConfig,
@@ -64,6 +73,7 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
     private readonly hooks: {
       onEdit?: (m: BridgeMessage, editKey: string) => Promise<void>;
       onDelete?: (chatId: string | undefined, messageId: string) => Promise<void>;
+      onReaction?: (r: BridgeReaction) => Promise<void>;
     } = {},
   ) {}
 
@@ -101,6 +111,14 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
             this.logger.error({ err: String(err) }, "bridge: telegram delete failed"),
           );
     }, new DeletedMessage({}));
+    client.addEventHandler(
+      (u: Api.UpdateMessageReactions) => {
+        void this.handleReactions(u).catch((err) =>
+          this.logger.error({ err: String(err) }, "bridge: telegram reaction failed"),
+        );
+      },
+      new Raw({ types: [Api.UpdateMessageReactions] }),
+    );
     // Warm the entity cache so chats can be addressed by id after a restart (rehydrating queued jobs).
     await client.getDialogs({ limit: 200 }).catch(() => undefined);
     this.started = true;
@@ -124,6 +142,62 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
     const msg = await this.toBridge(e.message);
     if (msg)
       await this.hooks.onEdit?.(msg, String(e.message.editDate ?? e.message.date ?? Date.now()));
+  }
+
+  private async handleReactions(u: Api.UpdateMessageReactions) {
+    if (!this.client || !this.hooks.onReaction) return;
+    const recent = u.reactions.recentReactions;
+    if (!recent) return; // anonymous counts only: nobody to attribute
+    const chatId = id(this.client ? await this.client.getPeerId(u.peer) : "");
+    const key = `${chatId}:${u.msgId}`;
+    const known = this.seenReactions.has(key);
+    const before = this.seenReactions.get(key) ?? new Map<string, string>();
+    // State unknown (after a restart): only the newest reactor is certainly new.
+    const newest = [...recent].sort((a, b) => b.date - a.date)[0];
+    const now = new Map<string, string>();
+    const names = new Map<string, { name: string; mine: boolean }>();
+    for (const r of recent) {
+      const who = id(await this.client.getPeerId(r.peerId));
+      const emoji = r.reaction instanceof Api.ReactionEmoji ? r.reaction.emoticon : "";
+      if (!emoji) continue;
+      now.set(who, emoji);
+      const user = (await this.client.getEntity(r.peerId).catch(() => undefined)) as
+        | (Api.User & { title?: string })
+        | undefined;
+      names.set(who, {
+        name: [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.title || who,
+        mine: !!r.my,
+      });
+    }
+    this.seenReactions.set(key, now);
+    if (this.seenReactions.size > 2000)
+      this.seenReactions.delete(this.seenReactions.keys().next().value as string);
+    for (const [who, emoji] of now) {
+      if (before.get(who) === emoji) continue;
+      if (!known && newest && who !== id(await this.client.getPeerId(newest.peerId))) continue;
+      const n = names.get(who);
+      await this.hooks.onReaction({
+        platform: "telegram",
+        chatId,
+        messageId: String(u.msgId),
+        emoji,
+        senderId: who,
+        senderName: n?.name ?? who,
+        fromMe: !!n?.mine,
+      });
+    }
+    for (const [who] of before) {
+      if (now.has(who)) continue;
+      await this.hooks.onReaction({
+        platform: "telegram",
+        chatId,
+        messageId: String(u.msgId),
+        emoji: "",
+        senderId: who,
+        senderName: who,
+        fromMe: false,
+      });
+    }
   }
 
   /** Rebuilds a message after a restart from the (chat, id) handle stored with a queued job. */
@@ -202,7 +276,11 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
               ),
             }
           : undefined,
-      replyToId: m.replyTo?.replyToMsgId ? String(m.replyTo.replyToMsgId) : undefined,
+      // In a forum topic a bare "reply to the topic" only means "posted in this topic".
+      replyToId:
+        m.replyTo?.replyToMsgId && !(m.replyTo.forumTopic && !m.replyTo.replyToTopId)
+          ? String(m.replyTo.replyToMsgId)
+          : undefined,
       albumId: m.groupedId ? String(m.groupedId) : undefined,
       ref: { chatId, messageId: String(m.id) },
       timestamp: m.date,
@@ -272,6 +350,39 @@ export class TelegramBridgeEndpoint implements BridgeEndpoint {
     const entity = await this.client.getInputEntity(dest.chatId);
     await this.client.editMessage(entity, { message: Number(messageId), text: out.text });
     return true;
+  }
+
+  async react(dest: Destination, messageId: string, emoji: string): Promise<boolean> {
+    if (!this.client) throw new Error("Telegram bridge not connected");
+    const peer = await this.client.getInputEntity(dest.chatId);
+    await this.client.invoke(
+      new Api.messages.SendReaction({
+        peer,
+        msgId: Number(messageId),
+        reaction: emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [],
+      }),
+    );
+    return true;
+  }
+
+  /** Makes a topic in a forum group; its id is the id of the "topic created" service message. */
+  async createTopic(chatId: string, title: string): Promise<string> {
+    if (!this.client) throw new Error("Telegram bridge not connected");
+    const peer = await this.client.getInputEntity(chatId);
+    const res = await this.client.invoke(
+      new Api.messages.CreateForumTopic({
+        peer,
+        title: title.slice(0, 128) || "chat",
+        randomId: BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000)),
+      } as never),
+    );
+    const updates = (res as { updates?: unknown[] }).updates ?? [];
+    for (const u of updates) {
+      const m = (u as { message?: { id?: number } }).message;
+      if (m?.id && (u as { className?: string }).className?.startsWith("UpdateNew"))
+        return String(m.id);
+    }
+    throw new Error("Telegram did not return the new topic id");
   }
 
   async remove(dest: Destination, messageId: string): Promise<boolean> {

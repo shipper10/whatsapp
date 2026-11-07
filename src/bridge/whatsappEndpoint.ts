@@ -8,6 +8,7 @@ import type {
   AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
+  BridgeReaction,
   ChatInfo,
   Destination,
   MessageType,
@@ -55,12 +56,59 @@ export const extFor = (mime?: string, name?: string) =>
 const digits = (jid?: string | null) =>
   jid?.endsWith(PN) ? jid.split("@")[0]?.split(":")[0] : undefined;
 
+/** Every contextInfo of a (normalised) message: replies and mentions live there, whatever the message kind. */
+const contextOf = (
+  c: Record<string, any>,
+): { stanzaId?: string; mentionedJid?: string[] } | undefined => {
+  for (const k of [
+    "extendedTextMessage",
+    "imageMessage",
+    "videoMessage",
+    "ptvMessage",
+    "audioMessage",
+    "documentMessage",
+    "stickerMessage",
+    "locationMessage",
+    "liveLocationMessage",
+    "contactMessage",
+    "pollCreationMessage",
+    "pollCreationMessageV3",
+  ]) {
+    const ci = c[k]?.contextInfo;
+    if (ci) return ci;
+  }
+  return undefined;
+};
+
+/** Everyone @mentioned in a message (JIDs, possibly LIDs). */
+export const mentionedOf = (m: WAMessage): string[] => {
+  const c = normalizeMessageContent(m.message) as Record<string, any> | null | undefined;
+  return (c && contextOf(c)?.mentionedJid) || [];
+};
+
+/** WhatsApp writes "@<number>" in the text for a mention; show "@Name" instead (the number is often a LID, not a phone). */
+export function applyMentions(
+  text: string,
+  jids: string[],
+  nameOf: (jid: string) => string | undefined,
+): string {
+  let out = text;
+  for (const jid of jids) {
+    const user = jid.split("@")[0]?.split(":")[0];
+    if (!user) continue;
+    const label = nameOf(jid) ?? (jid.endsWith(PN) ? `+${user}` : "someone");
+    out = out.replace(new RegExp(`@${user}(?!\\d)`, "g"), () => `@${label}`);
+  }
+  return out;
+}
+
 /** WhatsApp message -> neutral. View-once wrappers are unwrapped by Baileys, so they are handled as normal media. */
 export function whatsappToBridge(
   m: WAMessage,
   titleOf: (jid: string) => string,
   download: (m: WAMessage) => Promise<Buffer>,
   savedName?: (jids: (string | undefined)[]) => string | undefined,
+  mentionName?: (jid: string) => string | undefined,
 ): BridgeMessage | null {
   const key = m.key;
   const chat = key?.remoteJid;
@@ -76,32 +124,26 @@ export function whatsappToBridge(
   let location: BridgeMessage["location"];
   let contact: BridgeMessage["contact"];
   let poll: BridgeMessage["poll"];
-  let ctx: { stanzaId?: string } | undefined;
 
   if (c.imageMessage) {
     type = "image";
     text = c.imageMessage.caption ?? "";
     mimeType = c.imageMessage.mimetype;
-    ctx = c.imageMessage.contextInfo;
   } else if (c.videoMessage) {
     type = "video";
     text = c.videoMessage.caption ?? "";
     mimeType = c.videoMessage.mimetype;
-    ctx = c.videoMessage.contextInfo;
   } else if (c.ptvMessage) {
     type = "video";
     mimeType = c.ptvMessage.mimetype;
-    ctx = c.ptvMessage.contextInfo;
   } else if (c.audioMessage) {
     type = c.audioMessage.ptt ? "voice" : "audio";
     mimeType = c.audioMessage.mimetype;
-    ctx = c.audioMessage.contextInfo;
   } else if (c.documentMessage) {
     type = "document";
     text = c.documentMessage.caption ?? "";
     fileName = c.documentMessage.fileName;
     mimeType = c.documentMessage.mimetype;
-    ctx = c.documentMessage.contextInfo;
   } else if (c.stickerMessage) {
     type = "sticker";
     mimeType = c.stickerMessage.mimetype;
@@ -135,9 +177,12 @@ export function whatsappToBridge(
     // Text goes last: a media message must never be mistaken for an empty text.
     type = "text";
     text = c.conversation ?? c.extendedTextMessage?.text ?? "";
-    ctx = c.extendedTextMessage?.contextInfo;
   }
   if (!type) return null;
+  const ctx = contextOf(c);
+  const mentioned = ctx?.mentionedJid ?? [];
+  if (text && mentioned.length)
+    text = applyMentions(text, mentioned, mentionName ?? (() => undefined));
 
   const isGroup = chat.endsWith("@g.us");
   const senderJid = isGroup
@@ -203,16 +248,68 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
     private readonly hooks: {
       onEdit?: (m: BridgeMessage, editKey: string) => Promise<void>;
       onDelete?: (chatId: string | undefined, messageId: string) => Promise<void>;
+      onReaction?: (r: BridgeReaction) => Promise<void>;
     } = {},
   ) {}
+
+  /** Name of a chat: its group subject, or for a private chat the person's name (else their number). */
+  private titleOf = (jid: string) =>
+    this.titles.get(jid) ??
+    this.wa.displayNameOf(jid) ??
+    (jid.endsWith(PN) ? `+${jid.split("@")[0]}` : jid);
+
+  private mentionName = (jid: string) => {
+    const phone = this.wa.phoneOf(jid);
+    return (
+      this.wa.displayNameOf(jid, phone ? `${phone}${PN}` : undefined) ??
+      (phone ? `+${phone}` : undefined)
+    );
+  };
 
   private toBridge(m: WAMessage): BridgeMessage | null {
     return whatsappToBridge(
       m,
-      (jid) => this.titles.get(jid) ?? jid,
+      this.titleOf,
       (x) => this.wa.downloadBuffer(x),
       (jids) => this.wa.savedNameOf(...jids),
+      this.mentionName,
     );
+  }
+
+  /** Looks up the phone numbers behind the LIDs a message mentions, so names/numbers can be shown. */
+  private async warm(m: WAMessage) {
+    await this.wa
+      .warmPhones([...mentionedOf(m), m.key?.participant, m.key?.remoteJid])
+      .catch(() => undefined);
+  }
+
+  /** Wire this to BaileysDeps.onRawReaction. */
+  tapReaction = (
+    list: { key: WAMessage["key"]; reaction: { text?: string | null; key?: WAMessage["key"] } }[],
+  ) => {
+    for (const { key, reaction } of list) {
+      if (!key?.id || !key.remoteJid) continue;
+      const by = reaction.key;
+      const sender = by?.participant ?? by?.remoteJid ?? "";
+      const fromMe = !!by?.fromMe;
+      void this.hooks
+        .onReaction?.({
+          platform: "whatsapp",
+          chatId: key.remoteJid,
+          messageId: key.id,
+          emoji: reaction.text ?? "",
+          senderId: sender,
+          senderName: fromMe
+            ? ""
+            : (this.wa.displayNameOf(sender, by?.participantAlt as string | undefined) ?? ""),
+          fromMe,
+        })
+        ?.catch(this.onError);
+    }
+  };
+
+  async react(dest: Destination, messageId: string, emoji: string): Promise<boolean> {
+    return this.wa.sendReaction(dest.chatId, messageId, emoji);
   }
 
   /** Wire this to BaileysDeps.onRawUpdate: edits and "delete for everyone" arrive as message updates. */
@@ -227,16 +324,18 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
         update.message as { editedMessage?: { message?: unknown } } | null | undefined
       )?.editedMessage?.message;
       if (edited) {
-        const msg = this.toBridge({
+        const raw = {
           key,
           message: edited,
           pushName: this.wa.recentMessage(key.id)?.pushName,
           messageTimestamp: update.messageTimestamp,
-        } as unknown as WAMessage);
-        if (msg)
-          void this.hooks
-            .onEdit?.(msg, String(toSeconds(update.messageTimestamp)))
-            ?.catch(this.onError);
+        } as unknown as WAMessage;
+        void this.warm(raw)
+          .then(() => {
+            const msg = this.toBridge(raw);
+            if (msg) return this.hooks.onEdit?.(msg, String(toSeconds(update.messageTimestamp)));
+          })
+          .catch(this.onError);
       }
     }
   };
@@ -268,13 +367,33 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
 
   /** Wire this to BaileysDeps.onRawMessage. */
   tap = (m: WAMessage) => {
+    void this.process(m).catch(this.onError);
+  };
+
+  private async process(m: WAMessage) {
+    await this.warm(m);
     const msg = this.toBridge(m);
     if (msg) {
       if (msg.type === "text" && !msg.text.trim() && msg.chatId) {
         const keys = Object.keys((normalizeMessageContent(m.message) as object | undefined) ?? {});
         this.onUnrecognised?.(msg.chatId, [`empty text`, ...keys]);
       }
-      void this.onMessage(msg).catch(this.onError);
+      await this.onMessage(msg);
+      return;
+    }
+    // WhatsApp no longer sends the content of a view-once message to linked devices: only an empty
+    // "unavailable" stub arrives. Say so, instead of staying silent (the real content, if the phone
+    // answers the placeholder request, comes later as an ordinary message).
+    if (!m.message && (m.key as { isViewOnce?: boolean }).isViewOnce) {
+      const notice = this.toBridge({
+        ...m,
+        key: { ...m.key, id: `${m.key.id}:viewonce` },
+        message: {
+          conversation:
+            "👁 View-once message — WhatsApp does not deliver its content to linked devices. Open it on the phone.",
+        },
+      } as WAMessage);
+      if (notice) await this.onMessage(notice);
       return;
     }
     const kinds = Object.keys(
@@ -284,7 +403,7 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
       kinds.push(`no content (stub ${m.messageStubType ?? "none"})`);
     if (kinds.length && m.key?.remoteJid && !m.key.remoteJid.endsWith("@broadcast"))
       this.onUnrecognised?.(m.key.remoteJid, kinds);
-  };
+  }
 
   ready() {
     return this.wa.status().state === "open";

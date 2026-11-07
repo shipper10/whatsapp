@@ -55,6 +55,7 @@ export interface SocketLike {
   end(error: Error | undefined): void;
   /** Used by the bridge only. */
   groupFetchAllParticipating?(): Promise<Record<string, GroupMetadata>>;
+  signalRepository?: { lidMapping?: { getPNForLID(lid: string): Promise<string | null> } };
   updateMediaMessage?: (msg: WAMessage) => Promise<WAMessage>;
 }
 
@@ -91,6 +92,10 @@ export interface BaileysDeps {
   onRawMessage?: (m: WAMessage) => void;
   /** Bridge tap: message updates (edits and revocations arrive here). */
   onRawUpdate?: (updates: { key: WAMessage["key"]; update: Partial<WAMessage> }[]) => void;
+  /** Bridge tap: someone reacted to (or un-reacted from) a message. */
+  onRawReaction?: (
+    list: { key: WAMessage["key"]; reaction: { text?: string | null; key?: WAMessage["key"] } }[],
+  ) => void;
   namespace?: string;
   socketFactory?: (auth: AuthenticationState) => Promise<SocketLike>;
   /** Test hooks. */
@@ -118,11 +123,17 @@ export class BaileysProvider implements WhatsAppProvider {
   private timer: NodeJS.Timeout | null = null;
   /** Recent inbound messages, kept only so replies can quote the asker. */
   private recent = new Map<string, WAMessage>();
+  /** Messages this account sent (the bridge's copies), kept apart so they never push out the asker messages above. */
+  private sentRecent = new Map<string, WAMessage>();
   private sendChain: Promise<unknown> = Promise.resolve();
   private readonly uploads = new UploadMeter();
   private readonly uploaded = new Map<string, CachedUpload>();
   private lastSendAt = 0;
   private readonly contacts = new Map<string, { name?: string; notify?: string }>();
+  /** Names people chose for themselves (from the push name on their messages), by every id we know them by. */
+  private readonly pushNames = new Map<string, string>();
+  /** LID -> phone number, filled on demand. */
+  private readonly lidPhones = new Map<string, string>();
   private authClear: (() => Promise<void>) | null = null;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly backoff: (n: number) => number;
@@ -198,6 +209,16 @@ export class BaileysProvider implements WhatsAppProvider {
         }
       }) as never);
     }
+    if (this.deps.onRawReaction) {
+      const tap = this.deps.onRawReaction;
+      sock.ev.on("messages.reaction", ((list: Parameters<typeof tap>[0]) => {
+        try {
+          tap(list);
+        } catch (err) {
+          this.deps.logger.error({ err: String(err) }, "bridge reaction tap failed");
+        }
+      }) as never);
+    }
     sock.ev.on("contacts.upsert", ((list: Contact[]) => this.noteContacts(list)) as never);
     sock.ev.on("contacts.update", ((list: Partial<Contact>[]) => this.noteContacts(list)) as never);
 
@@ -209,6 +230,7 @@ export class BaileysProvider implements WhatsAppProvider {
           const fresh = Math.floor(Date.now() / 1000) - ts < 120;
           if (e.type !== "notify" && !(m.key.fromMe && fresh)) continue;
           this.remember(m);
+          this.notePushName(m);
           try {
             this.deps.onRawMessage(m);
           } catch (err) {
@@ -234,6 +256,53 @@ export class BaileysProvider implements WhatsAppProvider {
       for (const id of ids) {
         const cur = this.contacts.get(id) ?? {};
         this.contacts.set(id, { name: c.name ?? cur.name, notify: c.notify ?? cur.notify });
+      }
+    }
+  }
+
+  private notePushName(m: WAMessage): void {
+    const name = m.pushName;
+    if (!name || m.key.fromMe) return;
+    const ids = [
+      m.key.participant,
+      (m.key as { participantAlt?: string }).participantAlt,
+      m.key.remoteJid?.endsWith("@g.us") ? undefined : m.key.remoteJid,
+      (m.key as { remoteJidAlt?: string }).remoteJidAlt,
+    ];
+    for (const id of ids) if (id) this.pushNames.set(id, name);
+  }
+
+  /** Best name for a person: saved in the contacts, else the name they chose for themselves. */
+  displayNameOf(...jids: (string | null | undefined)[]): string | undefined {
+    return (
+      this.savedNameOf(...jids) ??
+      jids
+        .map((j) => (j ? (this.contacts.get(j)?.notify ?? this.pushNames.get(j)) : undefined))
+        .find(Boolean)
+    );
+  }
+
+  /** Phone digits for a PN or LID id (LIDs are looked up once, then cached). */
+  phoneOf(jid: string | null | undefined): string | undefined {
+    if (!jid) return undefined;
+    if (jid.endsWith("@s.whatsapp.net")) return jid.split("@")[0]?.split(":")[0];
+    const pn = this.lidPhones.get(jid.split(":")[0] ?? jid);
+    return pn?.split("@")[0]?.split(":")[0];
+  }
+
+  /** Looks up the phone numbers behind LIDs so they can be shown (call before mapping a message). */
+  async warmPhones(jids: (string | null | undefined)[]): Promise<void> {
+    const map = this.sock?.signalRepository?.lidMapping;
+    if (!map) return;
+    for (const j of jids) {
+      if (!j?.endsWith("@lid")) continue;
+      const key = j.split(":")[0] ?? j;
+      if (this.lidPhones.has(key)) continue;
+      try {
+        const pn = await map.getPNForLID(key);
+        if (pn) this.lidPhones.set(key, pn);
+      } catch {
+        /* no mapping known */
       }
     }
   }
@@ -364,9 +433,18 @@ export class BaileysProvider implements WhatsAppProvider {
     if (!sock || this.status_.state !== "open")
       return { confirmed: false, error: "whatsapp not connected" };
     try {
-      const quoted = quoteId ? this.recent.get(quoteId) : undefined;
+      const quoted = quoteId
+        ? (this.recent.get(quoteId) ?? this.sentRecent.get(quoteId))
+        : undefined;
       const sent = await sock.sendMessage(jid, content, quoted ? { quoted } : undefined);
       const id = sent?.key?.id;
+      if (sent?.key?.id) {
+        this.sentRecent.set(sent.key.id, sent);
+        if (this.sentRecent.size > RECENT_MAX * 2) {
+          const oldest = this.sentRecent.keys().next().value;
+          if (oldest !== undefined) this.sentRecent.delete(oldest);
+        }
+      }
       return id
         ? { confirmed: true, providerMessageId: id, raw: sent }
         : { confirmed: false, error: "no message id returned" };
@@ -498,7 +576,19 @@ export class BaileysProvider implements WhatsAppProvider {
 
   /** A message seen recently (kept for quoting); the bridge uses it to learn who edited a message. */
   recentMessage(id: string): WAMessage | undefined {
-    return this.recent.get(id);
+    return this.recent.get(id) ?? this.sentRecent.get(id);
+  }
+
+  /** Bridge: reacts to a message ("" removes the reaction). Needs the message's key, so it must be a recent one or our own. */
+  async sendReaction(jid: string, messageId: string, emoji: string): Promise<boolean> {
+    const sock = this.sock;
+    if (!sock || this.status_.state !== "open") return false;
+    const known = (this.recent.get(messageId) ?? this.sentRecent.get(messageId))?.key;
+    if (!known && jid.endsWith("@g.us"))
+      throw new Error("that message is too old to react to (not in memory)");
+    const key = known ?? { remoteJid: jid, id: messageId, fromMe: true };
+    await sock.sendMessage(jid, { react: { text: emoji, key } } as AnyMessageContent);
+    return true;
   }
 
   /** Bridge: deletes ("for everyone") a message this account sent. */

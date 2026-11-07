@@ -2,7 +2,13 @@ import { mkdir } from "node:fs/promises";
 import { Readable } from "node:stream";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
-import { buildOutgoing, matchRules } from "../src/bridge/engine.js";
+import {
+  ANY_TOPIC,
+  buildOutgoing,
+  contactRef,
+  matchRules,
+  PRIVATE_CHATS,
+} from "../src/bridge/engine.js";
 import { BridgeService } from "../src/bridge/service.js";
 import { BridgeStore } from "../src/bridge/store.js";
 import type {
@@ -15,6 +21,7 @@ import type {
   Platform,
 } from "../src/bridge/types.js";
 import { MESSAGE_TYPES } from "../src/bridge/types.js";
+import { applyMentions } from "../src/bridge/whatsappEndpoint.js";
 import { createBridgeUi } from "../src/http/bridgePanel.js";
 import { createTestDb } from "./helpers/pg.js";
 
@@ -47,6 +54,7 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   forwardEdits: true,
   forwardDeletes: true,
   logEnabled: true,
+  forwardReactions: true,
   srcAccountId: 0,
   dstAccountId: 0,
   ...o,
@@ -71,6 +79,10 @@ class FakeEndpoint implements BridgeEndpoint {
   sent: { dest: Destination; out: OutgoingBridge }[] = [];
   edited: { messageId: string; text: string }[] = [];
   removed: string[] = [];
+  reacted: { dest: Destination; messageId: string; emoji: string }[] = [];
+  reactError?: Error;
+  topics: { chatId: string; title: string }[] = [];
+  topicN = 100;
   albums: { items: AlbumItem[]; replyToId?: string }[] = [];
   withAlbums = false;
   hydrate = new Map<string, BridgeMessage>();
@@ -101,6 +113,15 @@ class FakeEndpoint implements BridgeEndpoint {
   async remove(_d: Destination, messageId: string) {
     this.removed.push(messageId);
     return true;
+  }
+  async react(dest: Destination, messageId: string, emoji: string) {
+    if (this.reactError) throw this.reactError;
+    this.reacted.push({ dest, messageId, emoji });
+    return true;
+  }
+  async createTopic(chatId: string, title: string) {
+    this.topics.push({ chatId, title });
+    return String(++this.topicN);
   }
   async rehydrate(ref: unknown) {
     return this.hydrate.get((ref as { id: string }).id) ?? null;
@@ -835,5 +856,215 @@ describe("per-rule log", () => {
     expect((await store.rule(id))?.enabled).toBe(false);
     await post(`/rules/${id}/delete`);
     expect(await store.rules()).toEqual([]);
+  });
+});
+
+describe("mentions", () => {
+  it("shows @Name instead of the raw id, and a phone only when the id is one", () => {
+    const names: Record<string, string> = { "111@lid": "Sara" };
+    const f = (j: string) => names[j];
+    expect(applyMentions("hi @111 and @249222", ["111@lid", "249222@s.whatsapp.net"], f)).toBe(
+      "hi @Sara and @+249222",
+    );
+    expect(applyMentions("@999", ["999@lid"], f)).toBe("@someone");
+    expect(applyMentions("@1112", ["111@lid"], f)).toBe("@1112"); // never a half match
+  });
+});
+
+describe("edits that have no copy yet", () => {
+  it("posts the new text when the message was never forwarded", async () => {
+    const { store, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handleEdit(msg({ messageId: "old", text: "fixed text" }), "t1");
+    expect(tg.edited).toHaveLength(0);
+    expect(tg.sent[0]?.out.text).toContain("✏️");
+    expect(tg.sent[0]?.out.text).toContain("fixed text");
+  });
+});
+
+describe("reactions", () => {
+  const react = (o: object = {}) => ({
+    platform: "whatsapp" as const,
+    chatId: "g1@g.us",
+    messageId: "m1",
+    emoji: "👍",
+    senderId: "249111@s.whatsapp.net",
+    senderName: "Sara",
+    fromMe: false,
+    ...o,
+  });
+
+  it("puts a WhatsApp reaction on the Telegram copy, and a Telegram one on the original", async () => {
+    const { store, wa, tg, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(msg());
+    await svc.handleReaction(react());
+    expect(tg.reacted).toEqual([
+      { dest: { chatId: "-100", topicId: "7" }, messageId: "telegram-out-1", emoji: "👍" },
+    ]);
+    await svc.handleReaction(
+      react({ platform: "telegram", chatId: "-100", messageId: "telegram-out-1", emoji: "🔥" }),
+    );
+    expect(wa.reacted[0]).toMatchObject({ messageId: "m1", emoji: "🔥" });
+  });
+
+  it("does not bounce the bridge's own reaction back", async () => {
+    const { store, tg, wa, svc } = await setup();
+    await store.addRule(rule());
+    await svc.handle(msg());
+    await svc.handleReaction(react());
+    // Telegram now reports the reaction the bridge just made
+    await svc.handleReaction(
+      react({ platform: "telegram", chatId: "-100", messageId: "telegram-out-1" }),
+    );
+    expect(wa.reacted).toHaveLength(0);
+    expect(tg.reacted).toHaveLength(1);
+  });
+
+  it("respects the rule switch and falls back to a note when the emoji is refused", async () => {
+    const a = await setup();
+    await a.store.addRule(rule({ forwardReactions: false }));
+    await a.svc.handle(msg());
+    await a.svc.handleReaction(react());
+    expect(a.tg.reacted).toHaveLength(0);
+
+    const b = await setup();
+    await b.store.addRule(rule());
+    await b.svc.handle(msg());
+    b.tg.reactError = new Error("REACTION_INVALID");
+    await b.svc.handleReaction(react({ emoji: "🥲" }));
+    expect(b.tg.sent.at(-1)?.out.text).toBe("Sara reacted 🥲");
+    expect(b.tg.sent.at(-1)?.out.replyToId).toBe("telegram-out-1");
+  });
+});
+
+describe("all private chats -> one topic per person", () => {
+  const dm = (o: Partial<BridgeMessage> = {}) =>
+    msg({ chatId: "249111@s.whatsapp.net", chatTitle: "Sara", ...o });
+  async function priv() {
+    const s = await setup();
+    const fid = await s.store.addRule(
+      rule({ srcChatId: PRIVATE_CHATS, dstChatId: "-100", dstTopicId: "", senderMode: "none" }),
+    );
+    const rid = await s.store.addRule(
+      rule({
+        id: 2,
+        srcPlatform: "telegram",
+        srcChatId: "-100",
+        srcTopicId: ANY_TOPIC,
+        dstPlatform: "whatsapp",
+        dstChatId: contactRef(fid),
+        dstTopicId: "",
+        senderMode: "none",
+      }),
+    );
+    return { ...s, fid, rid };
+  }
+
+  it("creates a topic for a new person and reuses it afterwards", async () => {
+    const { tg, svc } = await priv();
+    await svc.handle(dm());
+    await svc.handle(dm({ messageId: "m2", text: "again" }));
+    await svc.handle(dm({ chatId: "249222@s.whatsapp.net", chatTitle: "Omar", messageId: "m3" }));
+    expect(tg.topics.map((t) => t.title)).toEqual(["Sara (+249111)", "Omar (+249222)"]);
+    expect(tg.sent.map((x) => x.dest.topicId)).toEqual(["101", "101", "102"]);
+  });
+
+  it("ignores groups", async () => {
+    const { tg, svc } = await priv();
+    await svc.handle(msg()); // a group message
+    expect(tg.sent).toHaveLength(0);
+  });
+
+  it("sends what I write in a topic to that person, and nothing from other members", async () => {
+    const { tg, wa, svc } = await priv();
+    await svc.handle(dm());
+    await svc.handle(
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        topicId: "101",
+        messageId: "t1",
+        fromMe: true,
+        text: "reply",
+      }),
+    );
+    expect(wa.sent.at(-1)?.dest.chatId).toBe("249111@s.whatsapp.net");
+    expect(wa.sent.at(-1)?.out.text).toBe("reply");
+    await svc.handle(
+      msg({ platform: "telegram", chatId: "-100", topicId: "101", messageId: "t2", fromMe: false }),
+    );
+    await svc.handle(
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        topicId: "999",
+        messageId: "t3",
+        fromMe: true,
+      }),
+    );
+    expect(wa.sent).toHaveLength(1); // other member ignored; unknown topic ignored
+    expect(tg.topics).toHaveLength(1);
+  });
+
+  it("forgets a topic that was deleted on Telegram, so the next message makes a new one", async () => {
+    const { tg, store, fid, svc } = await priv();
+    await svc.handle(dm());
+    expect(await store.contactTopic(fid, "249111@s.whatsapp.net")).toBeDefined();
+    tg.failures.push(new Error("TOPIC_DELETED"));
+    await svc.handle(dm({ messageId: "m2" })); // the dead topic is dropped and a new one made at once
+    expect(tg.topics).toHaveLength(2);
+    expect(tg.sent.at(-1)?.dest.topicId).toBe("102");
+    expect((await store.contactTopic(fid, "249111@s.whatsapp.net"))?.topicId).toBe("102");
+  });
+
+  it("removes the reply path and the topics with the rule", async () => {
+    const { store, fid, svc } = await priv();
+    await svc.handle(dm());
+    await store.deleteRule(fid);
+    expect(await store.rules()).toEqual([]);
+    expect(await store.contactTopics(fid)).toEqual([]);
+  });
+});
+
+describe("dashboard: all private chats", () => {
+  it("creates the rule and its reply path, only towards a forum group, and shows the people", async () => {
+    const db = await createTestDb();
+    const store = new BridgeStore(db);
+    await store.upsertChats([
+      { platform: "telegram", chatId: "-100", title: "Forum", kind: "forum" },
+      { platform: "telegram", chatId: "-200", title: "Plain", kind: "supergroup" },
+    ]);
+    const ui = createBridgeUi({
+      store,
+      status: () => ({ whatsapp: true, telegram: true }),
+      refresh: async () => [],
+    });
+    const post = (sub: string, body: string) => {
+      const req = Object.assign(new Readable({ read() {} }), { method: "POST" });
+      req.push(body);
+      req.push(null);
+      return ui(req as never, sub, new URL("http://x/"));
+    };
+    const opts =
+      "&types=text&types=image&senderMode=saved&forwardOwn=1&forwardReactions=1&twoWay=1";
+    const bad = await post("/rules", `src=whatsapp%7C%40private%7C&dst=telegram%7C-200%7C${opts}`);
+    expect(bad.code).toBe(400);
+    expect(await store.rules()).toHaveLength(0);
+    const ok = await post("/rules", `src=whatsapp%7C%40private%7C&dst=telegram%7C-100%7C${opts}`);
+    expect(ok.redirect).toMatch(/rules\/\d+$/);
+    const [fwd, back] = await store.rules();
+    expect(fwd?.senderMode).toBe("none");
+    expect(fwd?.forwardReactions).toBe(true);
+    expect(back).toMatchObject({
+      srcPlatform: "telegram",
+      srcChatId: "-100",
+      srcTopicId: ANY_TOPIC,
+      dstPlatform: "whatsapp",
+      dstChatId: contactRef(fwd?.id as number),
+    });
+    const page = await ui({ method: "GET" } as never, `/rules/${fwd?.id}`, new URL("http://x/"));
+    expect(page.body).toContain("People with a topic");
+    expect(page.body).toContain("all private chats");
   });
 });

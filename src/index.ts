@@ -91,6 +91,7 @@ const driveClientFor = (credentialRef: string) => {
 let onIncoming: (id: string, msg: IncomingMessage) => Promise<void> = async () => undefined;
 let bridgeTap: ((m: WAMessage) => void) | undefined;
 let bridgeUpdateTap: ((u: never) => void) | undefined;
+let bridgeReactionTap: ((l: never) => void) | undefined;
 const baileys =
   env.WHATSAPP_PROVIDER === "baileys"
     ? new BaileysProvider({
@@ -100,6 +101,7 @@ const baileys =
         onMessage: (id, msg) => onIncoming(id, msg),
         onRawMessage: env.BRIDGE_ENABLED ? (m) => bridgeTap?.(m) : undefined,
         onRawUpdate: env.BRIDGE_ENABLED ? (u) => bridgeUpdateTap?.(u as never) : undefined,
+        onRawReaction: env.BRIDGE_ENABLED ? (l) => bridgeReactionTap?.(l as never) : undefined,
         minSendGapMs: () => settings.get("whatsapp.minSendGapMs"),
       })
     : null;
@@ -232,11 +234,13 @@ if (env.BRIDGE_ENABLED && baileys) {
     {
       onEdit: (m, key) => svc.handleEdit(m, key),
       onDelete: (chat, id) => svc.handleDelete("whatsapp", chat, id),
+      onReaction: (r) => svc.handleReaction(r),
     },
   );
   endpoints.whatsapp = wa;
   bridgeTap = wa.tap;
   bridgeUpdateTap = wa.tapUpdate as (u: never) => void;
+  bridgeReactionTap = wa.tapReaction as (l: never) => void;
   bridgeService = svc;
   if (env.TELEGRAM_API_ID && env.TELEGRAM_API_HASH && env.BRIDGE_TELEGRAM_SESSION_STRING) {
     bridgeTelegram = new TelegramBridgeEndpoint(
@@ -250,6 +254,7 @@ if (env.BRIDGE_ENABLED && baileys) {
       {
         onEdit: (m, key) => svc.handleEdit(m, key),
         onDelete: (chat, id) => svc.handleDelete("telegram", chat, id),
+        onReaction: (r) => svc.handleReaction(r),
       },
     );
     endpoints.telegram = bridgeTelegram;

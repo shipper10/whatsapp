@@ -1,35 +1,52 @@
 import type { BridgeMessage, BridgeRule, OutgoingBridge } from "./types.js";
 
+/** Source meaning "every private WhatsApp chat" (one Telegram topic per person). */
+export const PRIVATE_CHATS = "@private";
+/** Source topic meaning "any topic of this group" (the reply path of a private-chats rule). */
+export const ANY_TOPIC = "@any";
+/** Destination of a reply rule: the person that owns the topic, looked up from the private-chats rule `id`. */
+export const contactRef = (id: number) => `@contact:${id}`;
+export const isContactRef = (v: string) => v.startsWith("@contact:");
+export const contactRuleId = (v: string) => Number(v.slice("@contact:".length));
+
+const isPrivateChat = (msg: BridgeMessage) =>
+  msg.platform === "whatsapp" &&
+  !msg.chatId.endsWith("@g.us") &&
+  !msg.chatId.endsWith("@newsletter") &&
+  !msg.chatId.endsWith("@broadcast");
+
+/** Does the rule read from this message's chat/topic (filters on type and sender not considered)? */
+function sourceMatches(r: BridgeRule, msg: BridgeMessage): boolean {
+  if (!r.enabled || r.srcPlatform !== msg.platform) return false;
+  if ((r.srcAccountId ?? 0) !== (msg.accountId ?? 0)) return false;
+  const chatOk = r.srcChatId === PRIVATE_CHATS ? isPrivateChat(msg) : r.srcChatId === msg.chatId;
+  if (!chatOk) return false;
+  if (r.srcTopicId === "") return true;
+  return r.srcTopicId === ANY_TOPIC ? !!msg.topicId : r.srcTopicId === (msg.topicId ?? "");
+}
+
 /** Rules that apply to this message. Disabled rules and types the rule did not select never match. */
 export function matchRules(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[] {
   return rules.filter(
     (r) =>
-      r.enabled &&
+      sourceMatches(r, msg) &&
       (r.forwardOwn || !msg.fromMe) &&
-      r.srcPlatform === msg.platform &&
-      (r.srcAccountId ?? 0) === (msg.accountId ?? 0) &&
-      r.srcChatId === msg.chatId &&
-      (r.srcTopicId === "" || r.srcTopicId === (msg.topicId ?? "")) &&
+      (!isContactRef(r.dstChatId) || msg.fromMe) &&
       r.types.includes(msg.type),
   );
 }
 
 /** Enabled rules whose source chat/topic is this message's chat, whatever their filters say. */
 export function rulesForChat(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[] {
-  return rules.filter(
-    (r) =>
-      r.enabled &&
-      r.srcPlatform === msg.platform &&
-      (r.srcAccountId ?? 0) === (msg.accountId ?? 0) &&
-      r.srcChatId === msg.chatId &&
-      (r.srcTopicId === "" || r.srcTopicId === (msg.topicId ?? "")),
-  );
+  return rules.filter((r) => sourceMatches(r, msg));
 }
 
 /** Why a rule on this chat does not forward the message (undefined when it does). */
 export function skipReason(msg: BridgeMessage, rule: BridgeRule): string | undefined {
   if (!rule.forwardOwn && msg.fromMe)
     return "message written by my own account (turned off in this rule)";
+  if (isContactRef(rule.dstChatId) && !msg.fromMe)
+    return "only messages written by your own account are sent on to a person";
   if (!rule.types.includes(msg.type)) return `type "${msg.type}" is not selected in this rule`;
   return undefined;
 }

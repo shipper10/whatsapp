@@ -1,3 +1,4 @@
+import { ANY_TOPIC, isContactRef, PRIVATE_CHATS } from "../../bridge/engine.js";
 import type { BridgeRule, ChatInfo, Platform, SenderMode } from "../../bridge/types.js";
 import { BASE, esc, page } from "../ui.js";
 
@@ -69,10 +70,16 @@ export function findChat(all: ChatInfo[], r: Ref) {
 
 /** "WhatsApp: Batch 20", with the account in brackets once there is more than one account on that platform. */
 export function endpointLabel(c: Chats, r: Ref) {
+  if (r.chatId === PRIVATE_CHATS || isContactRef(r.chatId)) {
+    const several = c.accounts.filter((a) => a.platform === r.platform).length > 1;
+    const who = several ? ` (${accountName(c, r.platform, r.accountId)})` : "";
+    return `${LABEL[r.platform]}${who}: ${r.chatId === PRIVATE_CHATS ? "👤 all private chats" : "↩ the person who owns the topic"}`;
+  }
   const hit = findChat(c.chats, r);
   const several = c.accounts.filter((a) => a.platform === r.platform).length > 1;
   const who = several ? ` (${accountName(c, r.platform, r.accountId)})` : "";
-  return `${LABEL[r.platform]}${who}: ${hit ? chatLabel(hit, c.chats) : `${r.chatId}${r.topicId ? ` / topic ${r.topicId}` : ""}`}`;
+  const topic = r.topicId === ANY_TOPIC ? " / any topic" : r.topicId ? ` / topic ${r.topicId}` : "";
+  return `${LABEL[r.platform]}${who}: ${hit ? chatLabel(hit, c.chats) : `${r.chatId}${topic}`}${hit || r.topicId !== ANY_TOPIC ? "" : ""}`;
 }
 
 export const ruleRoute = (rule: BridgeRule, c: Chats) => ({
@@ -101,6 +108,9 @@ export function ruleChips(r: BridgeRule): string {
     r.forwardOwn ? "" : chip("my own messages: off", "warn"),
     r.forwardEdits ? "" : chip("edits: off", "warn"),
     r.forwardDeletes ? "" : chip("deletes: off", "warn"),
+    r.forwardReactions ? "" : chip("reactions: off", "warn"),
+    r.srcChatId === PRIVATE_CHATS ? chip("a topic per person", "ok") : "",
+    isContactRef(r.dstChatId) ? chip("reply path", "ok") : "",
     r.logEnabled ? "" : chip("log: off", "off"),
   ].join("")}</div>`;
 }

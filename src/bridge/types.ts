@@ -102,6 +102,23 @@ export interface BridgeEndpoint {
   remove?(dest: Destination, messageId: string): Promise<boolean>;
   /** Sends several pictures/videos as one album; returns the destination message ids in order. */
   sendAlbum?(dest: Destination, items: AlbumItem[], replyToId?: string): Promise<string[]>;
+  /** Puts a reaction on a message we posted or that lives in this chat ("" removes it). */
+  react?(dest: Destination, messageId: string, emoji: string): Promise<boolean>;
+  /** Creates a topic in a forum group and returns its id. */
+  createTopic?(chatId: string, title: string): Promise<string>;
+}
+
+/** Someone reacted to a message (emoji "" = the reaction was removed). */
+export interface BridgeReaction {
+  platform: Platform;
+  accountId?: number;
+  chatId: string;
+  /** The message that was reacted to. */
+  messageId: string;
+  emoji: string;
+  senderId: string;
+  senderName: string;
+  fromMe: boolean;
 }
 
 export interface BridgeRule {
@@ -130,6 +147,8 @@ export interface BridgeRule {
   forwardDeletes: boolean;
   /** Keep a per-rule log of what happened to each message. */
   logEnabled: boolean;
+  /** Mirror reactions between a message and its copy. */
+  forwardReactions: boolean;
 }
 
 export const SENDER_MODES = ["profile", "saved", "custom", "none"] as const;

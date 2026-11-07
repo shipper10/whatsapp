@@ -71,6 +71,35 @@ describe("WhatsApp -> bridge mapping", () => {
   });
 });
 
+describe("replies and mentions on every message kind", () => {
+  it("keeps the reply of a sticker (and of a location)", () => {
+    const ctx = { contextInfo: { stanzaId: "ORIG1" } };
+    expect(conv(base({ stickerMessage: { mimetype: "image/webp", ...ctx } }))?.replyToId).toBe(
+      "ORIG1",
+    );
+    expect(
+      conv(base({ locationMessage: { degreesLatitude: 1, degreesLongitude: 2, ...ctx } }))
+        ?.replyToId,
+    ).toBe("ORIG1");
+  });
+
+  it("writes a mention as @Name", () => {
+    const m = whatsappToBridge(
+      base({
+        extendedTextMessage: {
+          text: "hi @111222",
+          contextInfo: { mentionedJid: ["111222@lid"] },
+        },
+      }),
+      () => "Group",
+      async () => Buffer.from("x"),
+      () => undefined,
+      (jid) => (jid === "111222@lid" ? "Sara" : undefined),
+    );
+    expect(m?.text).toBe("hi @Sara");
+  });
+});
+
 describe("media is never mistaken for text", () => {
   it("prefers the media kind when a message also carries text fields", () => {
     const m = conv(

@@ -1,12 +1,22 @@
 import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { stickerToPng } from "./convert.js";
-import { buildOutgoing, isMediaType, matchRules, rulesForChat, skipReason } from "./engine.js";
+import {
+  buildOutgoing,
+  contactRuleId,
+  isContactRef,
+  isMediaType,
+  matchRules,
+  PRIVATE_CHATS,
+  rulesForChat,
+  skipReason,
+} from "./engine.js";
 import type { BridgeStore, JobRow, LogLevel } from "./store.js";
 import type {
   AlbumItem,
   BridgeEndpoint,
   BridgeMessage,
+  BridgeReaction,
   BridgeRule,
   OutgoingBridge,
   Platform,
@@ -87,9 +97,14 @@ export const endpointKey = (platform: Platform, accountId = 0) =>
 const LOG_KEEP = 500;
 
 /** Telegram tells clients to back off with a FloodWait; everything else gets a short exponential retry. */
+/** Telegram answers that will not change by trying again. */
+const PERMANENT =
+  /TOPIC_DELETED|TOPIC_ID_INVALID|TOPIC_CLOSED|MESSAGE_ID_INVALID|REACTION_INVALID/i;
+
 function retryDelayMs(err: unknown, attempt: number): number | null {
   const seconds = (err as { seconds?: number }).seconds;
   if (typeof seconds === "number") return (seconds + 1) * 1000;
+  if (PERMANENT.test(String(err))) return null; // retrying cannot help
   if (attempt >= 3) return null;
   return 1500 * 2 ** attempt;
 }
@@ -164,6 +179,9 @@ export class BridgeService {
   }
 
   private logCount = new Map<number, number>();
+  private readonly creating = new Map<string, Promise<{ id: number; topicId: string }>>();
+  /** Reactions the bridge itself just made, so their echo from the other side is not mirrored back. */
+  private readonly reactionEchoes = new Map<string, number>();
 
   /** Writes one line to the rule's own log (when the rule keeps one). Logging never breaks forwarding. */
   private async log(
@@ -184,6 +202,92 @@ export class BridgeService {
     }
   }
 
+  /**
+   * Where a message for this rule really goes, when that depends on the message:
+   * a private chat gets its own topic (made when the job runs), and a message typed in such a topic goes to its person.
+   */
+  private async dynamic(
+    rule: BridgeRule,
+    msg: BridgeMessage,
+  ): Promise<{ extra: Record<string, unknown> } | { skip: string }> {
+    const { store } = this.deps;
+    if (rule.srcChatId === PRIVATE_CHATS) {
+      const phone = /^(\d+)@s\.whatsapp\.net$/.exec(msg.chatId)?.[1];
+      const title = msg.chatTitle && msg.chatTitle !== msg.chatId ? msg.chatTitle : "";
+      const name =
+        title.startsWith("+") || !phone
+          ? title || msg.chatId
+          : `${title || "+" + phone}${title ? ` (+${phone})` : ""}`;
+      return { extra: { topicFor: { peerChatId: msg.chatId, peerName: name.slice(0, 120) } } };
+    }
+    if (isContactRef(rule.dstChatId)) {
+      const owner = contactRuleId(rule.dstChatId);
+      const person = msg.topicId
+        ? await store.contactOfTopic(owner, msg.chatId, msg.topicId)
+        : undefined;
+      if (!person) return { skip: "this topic is not linked to a person" };
+      return {
+        extra: {
+          dst: {
+            platform: rule.dstPlatform,
+            accountId: rule.dstAccountId,
+            chatId: person.peerChatId,
+            topicId: "",
+          },
+        },
+      };
+    }
+    return { extra: {} };
+  }
+
+  /** The rule as it applies to one job: with the person's topic or chat filled in. Undefined = nothing to do. */
+  private async effectiveRule(job: JobRow, rule: BridgeRule): Promise<BridgeRule | undefined> {
+    const p = job.payload as {
+      dst?: { platform?: Platform; accountId?: number; chatId: string; topicId?: string };
+      topicFor?: { peerChatId: string; peerName: string };
+    };
+    if (p.dst)
+      return {
+        ...rule,
+        dstPlatform: p.dst.platform ?? rule.dstPlatform,
+        dstAccountId: p.dst.accountId ?? rule.dstAccountId,
+        dstChatId: p.dst.chatId,
+        dstTopicId: p.dst.topicId ?? "",
+      };
+    if (p.topicFor && (job.kind === "send" || job.kind === "album" || job.kind === "edit")) {
+      const t = await this.topicFor(rule, p.topicFor.peerChatId, p.topicFor.peerName);
+      return { ...rule, dstTopicId: t.topicId };
+    }
+    return rule;
+  }
+
+  /** The topic of one person (made on the first message; two simultaneous messages share one creation). */
+  private async topicFor(rule: BridgeRule, peerChatId: string, peerName: string) {
+    const { store } = this.deps;
+    const found = await store.contactTopic(rule.id, peerChatId);
+    if (found) return found;
+    const key = `${rule.id}:${peerChatId}`;
+    let pending = this.creating.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const dst = this.endpoint(rule.dstPlatform, rule.dstAccountId);
+        if (!dst?.createTopic) throw new Error(`${rule.dstPlatform} cannot create topics here`);
+        const topicId = await dst.createTopic(rule.dstChatId, peerName || peerChatId);
+        const row = await store.addContactTopic({
+          ruleId: rule.id,
+          peerChatId,
+          peerName,
+          dstChatId: rule.dstChatId,
+          topicId,
+        });
+        await this.log(rule, "ok", "topic", "", `new topic "${peerName}"`);
+        return row;
+      })().finally(() => this.creating.delete(key));
+      this.creating.set(key, pending);
+    }
+    return pending;
+  }
+
   private note(p: BridgeProblem) {
     this.problems_.push(p);
     if (this.problems_.length > 30) this.problems_.shift();
@@ -199,7 +303,7 @@ export class BridgeService {
 
     const allRules = await store.rules();
     // Telegram delivers every chat the account is in; only chats used as a source in some rule are of interest.
-    if (!allRules.some((r) => r.srcPlatform === msg.platform && r.srcChatId === msg.chatId)) return;
+    if (rulesForChat(msg, allRules).length === 0) return;
     const rules = matchRules(msg, allRules);
     this.seenMsg({
       at: new Date(),
@@ -261,12 +365,18 @@ export class BridgeService {
     this.live.set(this.liveKey(msg), msg);
     if (this.live.size > 500) this.live.delete(this.live.keys().next().value as string);
     for (const r of rules) {
+      const d = await this.dynamic(r, msg);
+      if ("skip" in d) {
+        await this.log(r, "skip", "skipped", msg.type, d.skip);
+        continue;
+      }
       await this.log(r, "ok", "queued", msg.type, `from ${msg.senderName || msg.senderId || "?"}`);
       await this.deps.store.enqueue({
         kind: "send",
         ruleId: r.id,
         dedupeKey: `s:${r.id}:${msg.platform}:${msg.chatId}:${msg.messageId}`,
         payload: {
+          ...d.extra,
           platform: msg.platform,
           accountId: msg.accountId ?? 0,
           chatId: msg.chatId,
@@ -310,12 +420,18 @@ export class BridgeService {
     for (const m of msgs) this.live.set(this.liveKey(m), m);
     const first = msgs[0] as BridgeMessage;
     for (const r of a.rules) {
+      const d = await this.dynamic(r, first);
+      if ("skip" in d) {
+        await this.log(r, "skip", "skipped", "album", d.skip);
+        continue;
+      }
       await this.log(r, "ok", "queued", "album", `${msgs.length} items`);
       await this.deps.store.enqueue({
         kind: "album",
         ruleId: r.id,
         dedupeKey: `a:${r.id}:${first.platform}:${first.chatId}:${first.messageId}`,
         payload: {
+          ...d.extra,
           members: msgs.map((m) => ({
             platform: m.platform,
             accountId: m.accountId ?? 0,
@@ -335,8 +451,21 @@ export class BridgeService {
   async handleEdit(msg: BridgeMessage, editKey: string): Promise<void> {
     const { store } = this.deps;
     if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) return; // our own edit of a copy
-    const rules = matchRules(msg, await store.rules()).filter((r) => r.forwardEdits);
-    if (rules.length === 0) return;
+    const all = await store.rules();
+    const rules = matchRules(msg, all).filter((r) => r.forwardEdits);
+    if (rules.length === 0) {
+      for (const r of rulesForChat(msg, all))
+        await this.log(
+          r,
+          "skip",
+          "skipped",
+          "edit",
+          r.forwardEdits
+            ? skipReason(msg, r) || "edit not matched"
+            : "edits are turned off in this rule",
+        );
+      return;
+    }
     this.seenMsg({
       at: new Date(),
       platform: msg.platform,
@@ -346,6 +475,11 @@ export class BridgeService {
       rules: rules.length,
     });
     for (const r of rules) {
+      const d = await this.dynamic(r, msg);
+      if ("skip" in d) {
+        await this.log(r, "skip", "skipped", "edit", d.skip);
+        continue;
+      }
       const out = buildOutgoing(msg, r);
       await this.log(r, "ok", "queued", "edit", "source message was edited");
       await store.enqueue({
@@ -353,6 +487,7 @@ export class BridgeService {
         ruleId: r.id,
         dedupeKey: `e:${r.id}:${msg.platform}:${msg.chatId}:${msg.messageId}:${editKey}`,
         payload: {
+          ...d.extra,
           srcPlatform: msg.platform,
           srcChatId: msg.chatId,
           srcMessageId: msg.messageId,
@@ -378,7 +513,7 @@ export class BridgeService {
         r.forwardDeletes &&
         r.srcPlatform === platform &&
         r.srcAccountId === accountId &&
-        (chatId === undefined || r.srcChatId === chatId),
+        (chatId === undefined || r.srcChatId === chatId || r.srcChatId === PRIVATE_CHATS),
     );
     if (rules.length === 0) return;
     const known = chatId
@@ -387,7 +522,11 @@ export class BridgeService {
     let n = 0;
     for (const r of rules) {
       // Without a chat id, only act when a copy exists; otherwise the id may belong to an unrelated chat.
-      if (chatId === undefined && !known.some((c) => c.ruleId === r.id)) continue;
+      if (
+        (chatId === undefined || r.srcChatId === PRIVATE_CHATS) &&
+        !known.some((c) => c.ruleId === r.id)
+      )
+        continue;
       n++;
       await this.log(r, "ok", "queued", "delete", "source message was deleted");
       await store.enqueue({
@@ -398,6 +537,12 @@ export class BridgeService {
           srcPlatform: platform,
           srcChatId: chatId ?? known.find((c) => c.ruleId === r.id)?.srcChatId ?? r.srcChatId,
           srcMessageId: messageId,
+          ...(isContactRef(r.dstChatId)
+            ? (() => {
+                const c = known.find((k) => k.ruleId === r.id);
+                return c ? { dst: { chatId: c.chatId, topicId: "" } } : {};
+              })()
+            : {}),
         },
       });
     }
@@ -412,6 +557,134 @@ export class BridgeService {
     });
     this.kick();
     if (this.deps.inline) await this.processDue();
+  }
+
+  // ---- reactions
+
+  private echoKey = (p: Platform, acct: number, chat: string, msg: string, emoji: string) =>
+    `${p}:${acct}:${chat}:${msg}:${emoji}`;
+
+  /** Someone reacted to a message: mirror it onto the copy (or the original) when a rule allows. */
+  async handleReaction(r: BridgeReaction): Promise<void> {
+    const { store } = this.deps;
+    const acct = r.accountId ?? 0;
+    const k = this.echoKey(r.platform, acct, r.chatId, r.messageId, r.emoji);
+    const at = this.reactionEchoes.get(k);
+    if (at && Date.now() - at < 60_000) {
+      this.reactionEchoes.delete(k); // made by the bridge itself
+      return;
+    }
+    const rules = new Map((await store.rules()).map((x) => [x.id, x]));
+    const targets: {
+      rule: BridgeRule;
+      platform: Platform;
+      accountId: number;
+      chatId: string;
+      messageId: string;
+      topicId: string;
+    }[] = [];
+    for (const c of await store.copiesOf(r.platform, r.chatId, r.messageId)) {
+      const rule = rules.get(c.ruleId);
+      if (!rule?.enabled || !rule.forwardReactions) continue;
+      if ((rule.srcAccountId ?? 0) !== acct) continue;
+      targets.push({
+        rule,
+        platform: c.platform as Platform,
+        accountId: rule.dstAccountId,
+        chatId: c.chatId,
+        messageId: c.messageId,
+        topicId: rule.dstTopicId,
+      });
+    }
+    const orig = await store.originalOf(r.platform, r.chatId, r.messageId);
+    const orule = orig ? rules.get(orig.ruleId) : undefined;
+    if (orig && orule?.enabled && orule.forwardReactions && (orule.dstAccountId ?? 0) === acct)
+      targets.push({
+        rule: orule,
+        platform: orig.platform as Platform,
+        accountId: orule.srcAccountId,
+        chatId: orig.chatId,
+        messageId: orig.id,
+        topicId: "",
+      });
+    if (targets.length === 0) return;
+    for (const t of targets) {
+      await this.log(
+        t.rule,
+        "ok",
+        "queued",
+        "reaction",
+        `${r.senderName || r.senderId} ${r.emoji || "(removed)"}`,
+      );
+      await store.enqueue({
+        kind: "react",
+        ruleId: t.rule.id,
+        dedupeKey: `r:${t.rule.id}:${t.platform}:${t.chatId}:${t.messageId}:${r.emoji}:${Date.now()}:${r.senderId}`,
+        payload: {
+          to: {
+            platform: t.platform,
+            accountId: t.accountId,
+            chatId: t.chatId,
+            messageId: t.messageId,
+            topicId: t.topicId,
+          },
+          emoji: r.emoji,
+          who: r.senderName || r.senderId,
+        },
+      });
+    }
+    this.kick();
+    if (this.deps.inline) await this.processDue();
+  }
+
+  private async runReaction(job: JobRow, rule: BridgeRule) {
+    const p = job.payload as {
+      to: {
+        platform: Platform;
+        accountId: number;
+        chatId: string;
+        messageId: string;
+        topicId: string;
+      };
+      emoji: string;
+      who: string;
+    };
+    const dst = this.endpoint(p.to.platform, p.to.accountId);
+    if (!dst?.react) throw new Error(`${p.to.platform} cannot react here`);
+    const dest = { chatId: p.to.chatId, topicId: p.to.topicId || undefined };
+    const key = this.echoKey(p.to.platform, p.to.accountId, p.to.chatId, p.to.messageId, p.emoji);
+    this.reactionEchoes.set(key, Date.now());
+    if (this.reactionEchoes.size > 500)
+      this.reactionEchoes.delete(this.reactionEchoes.keys().next().value as string);
+    try {
+      await dst.react(dest, p.to.messageId, p.emoji);
+      await this.log(
+        rule,
+        "ok",
+        "reaction",
+        "",
+        `${p.who} ${p.emoji || "(removed)"} → ${p.to.platform}`,
+      );
+    } catch (err) {
+      this.reactionEchoes.delete(key);
+      if (p.emoji && /REACTION_INVALID/i.test(String(err))) {
+        // Telegram refuses emoji that are not enabled in the chat: say it in words instead.
+        await dst.send(dest, {
+          type: "text",
+          text: `${p.who} reacted ${p.emoji}`,
+          replyToId: p.to.messageId,
+        });
+        await this.log(
+          rule,
+          "warn",
+          "reaction",
+          "",
+          `emoji not allowed there, sent as a note: ${p.emoji}`,
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   // ---- the worker
@@ -447,8 +720,9 @@ export class BridgeService {
     const lanes = new Map<string, JobRow[]>();
     for (const j of jobs) {
       const r = rules.get(j.ruleId);
+      const who = j.payload as { topicFor?: { peerChatId: string }; dst?: { chatId: string } };
       const lane = r
-        ? `${r.dstPlatform}:${r.dstAccountId}:${r.dstChatId}:${r.dstTopicId}`
+        ? `${r.dstPlatform}:${r.dstAccountId}:${who.dst?.chatId ?? r.dstChatId}:${r.dstTopicId}:${who.topicFor?.peerChatId ?? ""}`
         : "orphan";
       lanes.set(lane, [...(lanes.get(lane) ?? []), j]);
     }
@@ -463,13 +737,27 @@ export class BridgeService {
     const { store, logger } = this.deps;
     try {
       if (!rule || !rule.enabled) return void (await store.complete(job.id)); // rule removed or paused meanwhile
-      if (job.kind === "send") await this.runSend(job, rule);
-      else if (job.kind === "album") await this.runAlbum(job, rule);
-      else if (job.kind === "edit") await this.runEdit(job, rule);
-      else await this.runDelete(job, rule);
+      if (job.kind === "react") await this.runReaction(job, rule);
+      else {
+        for (let again = 0; ; again++) {
+          const eff = await this.effectiveRule(job, rule);
+          if (!eff) return void (await store.complete(job.id));
+          try {
+            if (job.kind === "send") await this.runSend(job, eff);
+            else if (job.kind === "album") await this.runAlbum(job, eff);
+            else if (job.kind === "edit") await this.runEdit(job, eff);
+            else await this.runDelete(job, eff);
+            break;
+          } catch (err) {
+            // A person's topic that was deleted on Telegram: forget it and go again, which makes a new one.
+            if (again === 0 && (await this.forgetDeadTopic(job, rule, err))) continue;
+            throw err;
+          }
+        }
+      }
       await store.complete(job.id);
     } catch (err) {
-      const quick = job.kind === "edit" || job.kind === "delete";
+      const quick = job.kind === "edit" || job.kind === "delete" || job.kind === "react";
       const max = quick ? 4 : 5;
       const delays = quick
         ? [5_000, 10_000, 20_000, 40_000]
@@ -593,6 +881,17 @@ export class BridgeService {
     return { mediaPath, downloadError, dir };
   }
 
+  /** The person's topic was deleted on Telegram: forget it so the retry makes a new one. */
+  private async forgetDeadTopic(job: JobRow, rule: BridgeRule, err: unknown): Promise<boolean> {
+    const p = job.payload as { topicFor?: { peerChatId: string } };
+    if (!p.topicFor || !PERMANENT.test(String(err)) || /REACTION/i.test(String(err))) return false;
+    const t = await this.deps.store.contactTopic(rule.id, p.topicFor.peerChatId);
+    if (!t) return false;
+    await this.deps.store.dropContactTopic(t.id);
+    await this.log(rule, "warn", "topic", "", "topic was deleted on Telegram, a new one is made");
+    return true;
+  }
+
   private async runEdit(job: JobRow, rule: BridgeRule) {
     const p = job.payload as {
       srcPlatform: Platform;
@@ -609,7 +908,34 @@ export class BridgeService {
       p.srcMessageId,
       rule.dstChatId,
     );
-    if (!copy) throw new Error("the copy does not exist yet");
+    if (!copy) {
+      const state = await this.deps.store.jobState(
+        `s:${rule.id}:${p.srcPlatform}:${p.srcChatId}:${p.srcMessageId}`,
+      );
+      if (state === "pending" || state === "running")
+        throw new Error("the copy does not exist yet"); // still being sent: try again shortly
+      // Never forwarded (sent before the bridge ran, or it failed): post the new text instead of losing it.
+      if (!p.text.trim()) return;
+      await this.sendWithRetry(
+        dst,
+        { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined },
+        { type: "text", text: `✏️ ${p.text}` },
+        {
+          platform: p.srcPlatform,
+          chatId: p.srcChatId,
+          messageId: p.srcMessageId,
+        } as BridgeMessage,
+        rule,
+      );
+      await this.log(
+        rule,
+        "ok",
+        "edit",
+        p.type,
+        "no copy existed: edited text sent as a new message",
+      );
+      return;
+    }
     const dest = { chatId: rule.dstChatId, topicId: rule.dstTopicId || undefined };
     const ok = await dst.edit(dest, copy, { type: p.type, text: p.text });
     if (!ok) {

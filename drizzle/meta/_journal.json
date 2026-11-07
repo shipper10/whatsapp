@@ -78,6 +78,13 @@
       "when": 1793832466496,
       "tag": "0010_bridge_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794059485582,
+      "tag": "0011_bridge_reactions_private",
+      "breakpoints": true
     }
   ]
 }

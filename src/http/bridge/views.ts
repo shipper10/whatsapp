@@ -1,3 +1,4 @@
+import { PRIVATE_CHATS } from "../../bridge/engine.js";
 import type { BridgeStore, LogFilter } from "../../bridge/store.js";
 import {
   type BridgeRule,
@@ -129,8 +130,10 @@ export function builderView(
     forwardOwn: true,
     forwardEdits: true,
     forwardDeletes: true,
+    forwardReactions: true,
     logEnabled: true,
   };
+  const privateSrc = parseRef(b.src)?.chatId === PRIVATE_CHATS;
   const check = (name: string, on: boolean, text: string) =>
     `<label style="display:block"><input type="checkbox" name="${name}" value="1"${on ? " checked" : ""} style="width:auto"> ${text}</label>`;
   const typeBoxes = MESSAGE_TYPES.map(
@@ -149,7 +152,13 @@ ${tables}
 <div class="card"><h2>${editing ? "Options" : "2. Options"}</h2>
 <form method="post" action="${HERE}/rules">
 <input type="hidden" name="src" value="${esc(b.src ?? "")}"><input type="hidden" name="dst" value="${esc(b.dst ?? "")}">
-${editing ? `<input type="hidden" name="edit" value="${editing.id}">` : `<p><label>Direction <select name="direction"><option value="forward">one way (From → To)</option><option value="both">both ways</option></select></label></p>`}
+${
+  editing
+    ? `<input type="hidden" name="edit" value="${editing.id}">`
+    : privateSrc
+      ? `<p class="muted">Every WhatsApp private chat goes to the Telegram group you pick under “To” (it must be a group with Topics turned on, pick the group itself, not a topic). A new person gets a new topic; later messages go to the same topic. No sender name is added because the topic is the person.</p>${check("twoWay", true, "two-way: what I write in a topic is sent to that person on WhatsApp")}`
+      : `<p><label>Direction <select name="direction"><option value="forward">one way (From → To)</option><option value="both">both ways</option></select></label></p>`
+}
 <details class="card" open><summary>Message types</summary><p>${typeBoxes}</p></details>
 <details class="card" open><summary>Sender</summary>
 <p><label>Sender name <select name="senderMode">${SENDER_MODES.map((m) => `<option value="${m}"${m === o.senderMode ? " selected" : ""}>${esc(SENDER_LABEL[m])}</option>`).join("")}</select></label></p>
@@ -159,6 +168,7 @@ ${check("showPhone", o.showPhone, "show phone number (when available)")}</detail
 ${check("forwardOwn", o.forwardOwn, "also forward messages written by my own account")}
 ${check("forwardEdits", o.forwardEdits, "mirror edits")}
 ${check("forwardDeletes", o.forwardDeletes, "mirror deletions")}
+${check("forwardReactions", o.forwardReactions, "mirror reactions")}
 ${check("logEnabled", o.logEnabled, "keep a log for this rule")}</details>
 <p><button>${editing ? "Save changes" : "Add rule"}</button> <a class="btn ghost" href="${editing ? `${HERE}/rules/${editing.id}` : HERE}">Cancel</a></p></form></div>`,
     flash,
@@ -217,6 +227,7 @@ export async function ruleView(
 <div class="route">${esc(route.from)}<br>→ ${esc(route.to)}</div>${ruleChips(rule)}
 <div class="muted">last 24 h: <span class="ok">${sum.done} done</span> • ${sum.skipped} skipped • <span class="${sum.problems ? "bad" : ""}">${sum.problems} problems</span></div></div>
 <div class="acts"><a class="btn ghost" href="${base}/edit">Edit</a>${post("toggle", rule.enabled ? "Pause" : "Resume")}${ask("delete", "Delete")}</div></div>
+${await topicsCard(store, rule)}
 <details class="card" open id="log"><summary>Log <span class="badge">${everything} lines</span>${rule.logEnabled ? '<span class="badge ok">recording</span>' : '<span class="badge off">stopped</span>'}</summary>
 <div class="row" style="justify-content:space-between;margin-bottom:.5rem"><div class="tabs" style="margin:0">${tabs}</div>
 <div class="acts" style="flex:0 0 auto;display:flex;gap:.4rem">${post("log-toggle", rule.logEnabled ? "Stop logging" : "Start logging")}${ask("log-clear", "Clear log")}</div></div>
@@ -313,3 +324,18 @@ ${queue}
 
 export type { ChatInfo };
 export { ref };
+
+/** The people that already have a topic, for a "all private chats" rule. */
+async function topicsCard(store: BridgeStore, rule: BridgeRule) {
+  if (rule.srcChatId !== PRIVATE_CHATS) return "";
+  const rows = await store.contactTopics(rule.id);
+  const list = rows
+    .slice(0, 50)
+    .map(
+      (t) =>
+        `<tr><td>${esc(t.peerName)}</td><td class="muted">${esc(t.peerChatId.replace(/@.*/, ""))}</td><td>topic ${esc(t.topicId)}</td></tr>`,
+    )
+    .join("");
+  return `<details class="card"><summary>People with a topic <span class="badge">${rows.length}</span></summary><div class="scroll"><table>${list || '<tr><td class="muted">nobody yet — the first private message creates the first topic</td></tr>'}</table></div>
+<p class="muted">If you delete a topic on Telegram, the next message from that person makes a new one.</p></details>`;
+}

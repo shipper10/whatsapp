@@ -10,7 +10,7 @@ import { decryptSecret, encryptSecret } from "./secrets.js";
 import { type BridgeService, endpointKey } from "./service.js";
 import type { BridgeStore } from "./store.js";
 import { TelegramBridgeEndpoint } from "./telegramEndpoint.js";
-import type { BridgeEndpoint, BridgeMessage, Platform } from "./types.js";
+import type { BridgeEndpoint, BridgeMessage, BridgeReaction, Platform } from "./types.js";
 import { WhatsAppBridgeEndpoint } from "./whatsappEndpoint.js";
 
 interface Logger {
@@ -24,6 +24,7 @@ export interface AccountHooks {
   onMessage: (m: BridgeMessage) => Promise<void>;
   onEdit: (m: BridgeMessage, editKey: string) => Promise<void>;
   onDelete: (chatId: string | undefined, messageId: string) => Promise<void>;
+  onReaction: (r: BridgeReaction) => Promise<void>;
   onUnrecognised: (chat: string, kinds: string[]) => void;
   onError: (err: unknown) => void;
 }
@@ -80,6 +81,7 @@ export function defaultFactories(o: {
         onMessage: async () => undefined,
         onRawMessage: (m: WAMessage) => ep?.tap(m),
         onRawUpdate: (u) => ep?.tapUpdate(u),
+        onRawReaction: (l) => ep?.tapReaction(l),
         minSendGapMs: async () => 1500,
       });
       ep = new WhatsAppBridgeEndpoint(
@@ -90,6 +92,7 @@ export function defaultFactories(o: {
         {
           onEdit: hooks.onEdit,
           onDelete: hooks.onDelete,
+          onReaction: hooks.onReaction,
         },
       );
       return {
@@ -106,7 +109,7 @@ export function defaultFactories(o: {
         { apiId: o.apiId, apiHash: o.apiHash, sessionString: session },
         o.logger,
         hooks.onMessage,
-        { onEdit: hooks.onEdit, onDelete: hooks.onDelete },
+        { onEdit: hooks.onEdit, onDelete: hooks.onDelete, onReaction: hooks.onReaction },
       );
       return { endpoint: ep, start: () => ep.start(), stop: () => ep.stop() };
     },
@@ -198,6 +201,7 @@ export class AccountManager {
       onMessage: (m) => svc.handle({ ...m, accountId: id }),
       onEdit: (m, key) => svc.handleEdit({ ...m, accountId: id }, key),
       onDelete: (chat, mid) => svc.handleDelete(platform, chat, mid, id),
+      onReaction: (r) => svc.handleReaction({ ...r, accountId: id }),
       onUnrecognised: (chat, kinds) =>
         void svc.noteUnrecognised(platform, chat, kinds).catch(() => undefined),
       onError: (err) =>
