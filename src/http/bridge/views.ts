@@ -349,9 +349,10 @@ function repliersCard(rule: BridgeRule, base: string) {
   const opt = (v: string, t: string) =>
     `<option value="${v}"${mode === v ? " selected" : ""}>${t}</option>`;
   return `<div class="card" id="repliers"><h2>Who can reply</h2>
-<p class="muted">Messages written in a person's topic are sent to that person on WhatsApp through your number. Messages from other people are shown with their name in front, so the person knows who is writing. Anyone refused appears in the log with the id to add here.</p>
+<p class="muted">Messages written in a person's topic are sent to that person on WhatsApp through your number. Replies from other people go out as if you wrote them (tick the box below to put their name in front). Anyone refused appears in the log with the id to add here.</p>
 <form method="post" action="${base}/repliers" class="row">
 <select name="who">${opt("me", "Only me")}${opt("all", "Everyone in the group")}${opt("list", "Me and these people")}</select>
 <input name="ids" value="${esc(mode === "list" ? list.replace(/,/g, ", ") : "")}" placeholder="Telegram ids or @usernames, separated by commas" style="min-width:18rem">
+<label class="check"><input type="checkbox" name="showName" value="1"${rule.senderMode === "none" ? "" : " checked"}> put the writer's name in front of other people's replies</label>
 <button>Save</button></form></div>`;
 }

@@ -1042,11 +1042,18 @@ describe("all private chats -> one topic per person", () => {
     const r = (await store.rule(rid)) as BridgeRule;
     await store.updateRule(rid, { ...r, allowedSenders: "@Omar_X" });
     await svc.handle(other({ messageId: "x2" }));
-    expect(wa.sent.at(-1)?.out.text).toBe("Omar:\nhello from Omar");
+    expect(wa.sent.at(-1)?.out.text).toBe("hello from Omar"); // as if I wrote it
     await svc.handle(other({ messageId: "x3", senderId: "777", senderUsername: undefined }));
     expect(wa.sent).toHaveLength(1);
     await store.updateRule(rid, { ...r, allowedSenders: "*" });
     await svc.handle(other({ messageId: "x4", senderId: "777", senderName: "Lina" }));
+    await store.updateRule(rid, {
+      ...r,
+      allowedSenders: "*",
+      senderMode: "profile",
+      showPhone: false,
+    });
+    await svc.handle(other({ messageId: "x5", senderId: "777", senderName: "Lina" }));
     expect(wa.sent.at(-1)?.out.text).toBe("Lina:\nhello from Omar");
     expect(tg.topics).toHaveLength(1);
   });

@@ -392,7 +392,8 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         const who = f.get("who");
         const ids = (f.get("ids") ?? "").replace(/[\s,;]+/g, ",").replace(/^,|,$/g, "");
         const allowedSenders = who === "all" ? "*" : who === "list" ? ids : "";
-        await store.updateRule(id, { ...rule, allowedSenders });
+        const senderMode = f.get("showName") === "1" ? "profile" : "none";
+        await store.updateRule(id, { ...rule, allowedSenders, senderMode, showPhone: false });
         break;
       }
       case "log-toggle":

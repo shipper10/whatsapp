@@ -76,9 +76,6 @@ export function senderLabel(
   msg: BridgeMessage,
   rule: Pick<BridgeRule, "senderMode" | "customName" | "showPhone" | "dstChatId" | "replyPath">,
 ) {
-  // Someone else answering through my account: the person on WhatsApp must know who is writing.
-  if ((rule.replyPath || isContactRef(rule.dstChatId)) && !msg.fromMe)
-    return msg.senderName || msg.senderUsername || "";
   if (rule.senderMode === "none") return "";
   const fallback = msg.senderUsername || msg.senderId;
   const name =
