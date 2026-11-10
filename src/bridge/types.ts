@@ -149,6 +149,10 @@ export interface BridgeRule {
   logEnabled: boolean;
   /** Mirror reactions between a message and its copy. */
   forwardReactions: boolean;
+  /** Reply paths only: "" = just me, "*" = everyone in the group, else Telegram ids/usernames separated by commas. */
+  allowedSenders: string;
+  /** Set while a reply path runs (its destination is then a real person): not stored. */
+  replyPath?: boolean;
 }
 
 export const SENDER_MODES = ["profile", "saved", "custom", "none"] as const;

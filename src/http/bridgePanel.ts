@@ -1,7 +1,7 @@
 import type { IncomingMessage as HttpReq } from "node:http";
 import QRCode from "qrcode";
 import type { AccountManager } from "../bridge/accounts.js";
-import { ANY_TOPIC, contactRef, PRIVATE_CHATS } from "../bridge/engine.js";
+import { ANY_TOPIC, contactRef, isContactRef, PRIVATE_CHATS } from "../bridge/engine.js";
 import type { BridgeStore, NewRule } from "../bridge/store.js";
 import {
   MESSAGE_TYPES,
@@ -308,6 +308,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
       forwardDeletes: form.get("forwardDeletes") === "1",
       logEnabled: form.get("logEnabled") === "1",
       forwardReactions: form.get("forwardReactions") === "1",
+      allowedSenders: "",
     };
     const mk = (a: Ref, b: Ref): NewRule => ({
       ...base,
@@ -332,6 +333,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
             ...mk(dst, { ...src, chatId: contactRef(editId), topicId: "" }),
             srcTopicId: ANY_TOPIC,
             ...reversePart(src),
+            allowedSenders: reply.allowedSenders,
             enabled: reply.enabled,
           });
       }
@@ -369,7 +371,7 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
     if (sub.startsWith("/accounts/")) return accountAction(sub, req) as Promise<BridgeUiResult>;
     if (sub === "/rules") return saveRule(new URLSearchParams((await readBody(req)) ?? ""));
 
-    const m = /^\/rules\/(\d+)\/(toggle|delete|log-toggle|log-clear)$/.exec(sub);
+    const m = /^\/rules\/(\d+)\/(toggle|delete|log-toggle|log-clear|repliers)$/.exec(sub);
     if (!m) return NOT_FOUND;
     const id = Number(m[1]);
     const rule = await store.rule(id);
@@ -382,6 +384,15 @@ export function createBridgeUi(deps: BridgeUiDeps): BridgeUi {
         await store.setEnabled(id, !rule.enabled);
         const next = new URLSearchParams((await readBody(req)) ?? "").get("next");
         if (next === "list") return { redirect: here };
+        break;
+      }
+      case "repliers": {
+        if (!isContactRef(rule.dstChatId)) break;
+        const f = new URLSearchParams((await readBody(req)) ?? "");
+        const who = f.get("who");
+        const ids = (f.get("ids") ?? "").replace(/[\s,;]+/g, ",").replace(/^,|,$/g, "");
+        const allowedSenders = who === "all" ? "*" : who === "list" ? ids : "";
+        await store.updateRule(id, { ...rule, allowedSenders });
         break;
       }
       case "log-toggle":

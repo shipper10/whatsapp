@@ -287,6 +287,8 @@ export const bridgeRules = pgTable("bridge_rules", {
   /** Which linked account the chats belong to. 0 = the main account (library bot's WhatsApp / env Telegram session). */
   /** Mirror reactions between a message and its copy. */
   forwardReactions: boolean("forward_reactions").notNull().default(true),
+  /** Reply paths only: "" = just me, "*" = everyone in the group, else a list of Telegram ids/usernames. */
+  allowedSenders: text("allowed_senders").notNull().default(""),
   srcAccountId: integer("src_account_id").notNull().default(0),
   dstAccountId: integer("dst_account_id").notNull().default(0),
   createdAt: now(),

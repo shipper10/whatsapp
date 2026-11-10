@@ -55,6 +55,7 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   forwardDeletes: true,
   logEnabled: true,
   forwardReactions: true,
+  allowedSenders: "",
   srcAccountId: 0,
   dstAccountId: 0,
   ...o,
@@ -595,6 +596,8 @@ describe("bridge migrations", () => {
       "0008_bridge_queue",
       "0009_bridge_logs",
       "0010_bridge_accounts",
+      "0011_bridge_reactions_private",
+      "0012_bridge_repliers",
     ])
       for (const part of readFileSync(`drizzle/${f}.sql`, "utf8").split("--> statement-breakpoint"))
         await db.execute(sql.raw(part));
@@ -1016,6 +1019,36 @@ describe("all private chats -> one topic per person", () => {
     expect(tg.topics).toHaveLength(2);
     expect(tg.sent.at(-1)?.dest.topicId).toBe("102");
     expect((await store.contactTopic(fid, "249111@s.whatsapp.net"))?.topicId).toBe("102");
+  });
+
+  it("lets other members reply when the rule allows them, with their name in front", async () => {
+    const { tg, wa, store, rid, svc } = await priv();
+    await svc.handle(dm());
+    const other = (o: Partial<BridgeMessage> = {}) =>
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        topicId: "101",
+        messageId: "x1",
+        senderId: "555",
+        senderName: "Omar",
+        senderUsername: "omar_x",
+        fromMe: false,
+        text: "hello from Omar",
+        ...o,
+      });
+    await svc.handle(other());
+    expect(wa.sent).toHaveLength(0);
+    const r = (await store.rule(rid)) as BridgeRule;
+    await store.updateRule(rid, { ...r, allowedSenders: "@Omar_X" });
+    await svc.handle(other({ messageId: "x2" }));
+    expect(wa.sent.at(-1)?.out.text).toBe("Omar:\nhello from Omar");
+    await svc.handle(other({ messageId: "x3", senderId: "777", senderUsername: undefined }));
+    expect(wa.sent).toHaveLength(1);
+    await store.updateRule(rid, { ...r, allowedSenders: "*" });
+    await svc.handle(other({ messageId: "x4", senderId: "777", senderName: "Lina" }));
+    expect(wa.sent.at(-1)?.out.text).toBe("Lina:\nhello from Omar");
+    expect(tg.topics).toHaveLength(1);
   });
 
   it("removes the reply path and the topics with the rule", async () => {

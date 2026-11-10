@@ -253,6 +253,7 @@ export class BridgeService {
         dstAccountId: p.dst.accountId ?? rule.dstAccountId,
         dstChatId: p.dst.chatId,
         dstTopicId: p.dst.topicId ?? "",
+        replyPath: isContactRef(rule.dstChatId),
       };
     if (p.topicFor && (job.kind === "send" || job.kind === "album" || job.kind === "edit")) {
       const t = await this.topicFor(rule, p.topicFor.peerChatId, p.topicFor.peerName);

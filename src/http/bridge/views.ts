@@ -1,4 +1,4 @@
-import { PRIVATE_CHATS } from "../../bridge/engine.js";
+import { isContactRef, PRIVATE_CHATS } from "../../bridge/engine.js";
 import type { BridgeStore, LogFilter } from "../../bridge/store.js";
 import {
   type BridgeRule,
@@ -226,7 +226,8 @@ export async function ruleView(
 <div>${rule.enabled ? '<span class="badge ok">active</span>' : '<span class="badge off">paused</span>'} <span class="muted">rule #${rule.id}</span></div>
 <div class="route">${esc(route.from)}<br>→ ${esc(route.to)}</div>${ruleChips(rule)}
 <div class="muted">last 24 h: <span class="ok">${sum.done} done</span> • ${sum.skipped} skipped • <span class="${sum.problems ? "bad" : ""}">${sum.problems} problems</span></div></div>
-<div class="acts"><a class="btn ghost" href="${base}/edit">Edit</a>${post("toggle", rule.enabled ? "Pause" : "Resume")}${ask("delete", "Delete")}</div></div>
+<div class="acts">${isContactRef(rule.dstChatId) ? '<a class="btn ghost" href="#repliers">Who can reply</a>' : `<a class="btn ghost" href="${base}/edit">Edit</a>`}${post("toggle", rule.enabled ? "Pause" : "Resume")}${ask("delete", "Delete")}</div></div>
+${repliersCard(rule, base)}
 ${await topicsCard(store, rule)}
 <details class="card" open id="log"><summary>Log <span class="badge">${everything} lines</span>${rule.logEnabled ? '<span class="badge ok">recording</span>' : '<span class="badge off">stopped</span>'}</summary>
 <div class="row" style="justify-content:space-between;margin-bottom:.5rem"><div class="tabs" style="margin:0">${tabs}</div>
@@ -338,4 +339,19 @@ async function topicsCard(store: BridgeStore, rule: BridgeRule) {
     .join("");
   return `<details class="card"><summary>People with a topic <span class="badge">${rows.length}</span></summary><div class="scroll"><table>${list || '<tr><td class="muted">nobody yet — the first private message creates the first topic</td></tr>'}</table></div>
 <p class="muted">If you delete a topic on Telegram, the next message from that person makes a new one.</p></details>`;
+}
+
+/** Reply paths: who may write in the topics and have it sent to the person. */
+function repliersCard(rule: BridgeRule, base: string) {
+  if (!isContactRef(rule.dstChatId)) return "";
+  const list = rule.allowedSenders.trim();
+  const mode = list === "*" ? "all" : list ? "list" : "me";
+  const opt = (v: string, t: string) =>
+    `<option value="${v}"${mode === v ? " selected" : ""}>${t}</option>`;
+  return `<div class="card" id="repliers"><h2>Who can reply</h2>
+<p class="muted">Messages written in a person's topic are sent to that person on WhatsApp through your number. Messages from other people are shown with their name in front, so the person knows who is writing. Anyone refused appears in the log with the id to add here.</p>
+<form method="post" action="${base}/repliers" class="row">
+<select name="who">${opt("me", "Only me")}${opt("all", "Everyone in the group")}${opt("list", "Me and these people")}</select>
+<input name="ids" value="${esc(mode === "list" ? list.replace(/,/g, ", ") : "")}" placeholder="Telegram ids or @usernames, separated by commas" style="min-width:18rem">
+<button>Save</button></form></div>`;
 }

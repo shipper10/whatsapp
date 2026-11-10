@@ -53,6 +53,7 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
   forwardDeletes: r.forwardDeletes,
   logEnabled: r.logEnabled,
   forwardReactions: r.forwardReactions,
+  allowedSenders: r.allowedSenders,
   srcAccountId: r.srcAccountId,
   dstAccountId: r.dstAccountId,
 });

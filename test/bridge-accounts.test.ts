@@ -68,6 +68,7 @@ const rule = (o: Partial<BridgeRule> = {}): BridgeRule => ({
   forwardDeletes: true,
   logEnabled: true,
   forwardReactions: true,
+  allowedSenders: "",
   ...o,
 });
 

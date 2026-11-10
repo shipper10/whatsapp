@@ -15,6 +15,19 @@ const isPrivateChat = (msg: BridgeMessage) =>
   !msg.chatId.endsWith("@newsletter") &&
   !msg.chatId.endsWith("@broadcast");
 
+/** May this message go on to the person? Reply paths take my own messages and whoever the rule lists. */
+export function mayReply(r: Pick<BridgeRule, "allowedSenders">, msg: BridgeMessage): boolean {
+  if (msg.fromMe) return true;
+  const list = r.allowedSenders.trim();
+  if (list === "*") return true;
+  const mine = (v?: string) => (v ?? "").trim().replace(/^@/, "").toLowerCase();
+  return list
+    .split(/[\s,;]+/)
+    .map(mine)
+    .filter(Boolean)
+    .some((x) => x === mine(msg.senderId) || x === mine(msg.senderUsername));
+}
+
 /** Does the rule read from this message's chat/topic (filters on type and sender not considered)? */
 function sourceMatches(r: BridgeRule, msg: BridgeMessage): boolean {
   if (!r.enabled || r.srcPlatform !== msg.platform) return false;
@@ -31,7 +44,7 @@ export function matchRules(msg: BridgeMessage, rules: BridgeRule[]): BridgeRule[
     (r) =>
       sourceMatches(r, msg) &&
       (r.forwardOwn || !msg.fromMe) &&
-      (!isContactRef(r.dstChatId) || msg.fromMe) &&
+      (!isContactRef(r.dstChatId) || mayReply(r, msg)) &&
       r.types.includes(msg.type),
   );
 }
@@ -45,8 +58,8 @@ export function rulesForChat(msg: BridgeMessage, rules: BridgeRule[]): BridgeRul
 export function skipReason(msg: BridgeMessage, rule: BridgeRule): string | undefined {
   if (!rule.forwardOwn && msg.fromMe)
     return "message written by my own account (turned off in this rule)";
-  if (isContactRef(rule.dstChatId) && !msg.fromMe)
-    return "only messages written by your own account are sent on to a person";
+  if (isContactRef(rule.dstChatId) && !mayReply(rule, msg))
+    return `${msg.senderName || "someone"} (id ${msg.senderId}${msg.senderUsername ? `, @${msg.senderUsername}` : ""}) is not allowed to reply — add them in this rule's “Who can reply” box`;
   if (!rule.types.includes(msg.type)) return `type "${msg.type}" is not selected in this rule`;
   return undefined;
 }
@@ -61,8 +74,11 @@ const TYPE_LABEL: Record<string, string> = {
 /** "Name (+phone)" header according to the rule's sender mode; the phone only when asked for and exposed. */
 export function senderLabel(
   msg: BridgeMessage,
-  rule: Pick<BridgeRule, "senderMode" | "customName" | "showPhone">,
+  rule: Pick<BridgeRule, "senderMode" | "customName" | "showPhone" | "dstChatId" | "replyPath">,
 ) {
+  // Someone else answering through my account: the person on WhatsApp must know who is writing.
+  if ((rule.replyPath || isContactRef(rule.dstChatId)) && !msg.fromMe)
+    return msg.senderName || msg.senderUsername || "";
   if (rule.senderMode === "none") return "";
   const fallback = msg.senderUsername || msg.senderId;
   const name =
