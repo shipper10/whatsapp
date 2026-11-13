@@ -9,7 +9,7 @@ import {
 } from "../db/schema.js";
 import { withExtension } from "../delivery/fetchers.js";
 import type { RawEntity } from "../telegram/types.js";
-import { type IndexTitle, indexTitle } from "./indexSearch.js";
+import { type IndexTitle, indexTitle, linkLabel } from "./indexSearch.js";
 import { cleanCaption } from "./indexView.js";
 import type { ResourceHit } from "./search.js";
 
@@ -222,7 +222,11 @@ export async function rootIndexId(db: Db): Promise<number | null> {
 /** Titles of every synced index message (the channel's own tree of subjects/semesters/years). */
 export async function indexTitles(db: Db): Promise<IndexTitle[]> {
   const rows = await db
-    .select({ id: telegramMessages.messageId, text: telegramMessages.textOrCaption })
+    .select({
+      id: telegramMessages.messageId,
+      text: telegramMessages.textOrCaption,
+      meta: telegramMessages.entitiesJson,
+    })
     .from(telegramMessages)
     .where(
       and(
@@ -231,7 +235,28 @@ export async function indexTitles(db: Db): Promise<IndexTitle[]> {
       ),
     )
     .orderBy(asc(telegramMessages.messageId));
-  return rows.map((r) => ({ messageId: r.id, title: indexTitle(r.text ?? "") }));
+  // What other indexes call each index (the link text), so "medical prof" finds an index titled differently.
+  const labels = new Map<number, Set<string>>();
+  for (const r of rows) {
+    const text = r.text ?? "";
+    const entities = ((r.meta ?? {}) as { entities?: RawEntity[] }).entities ?? [];
+    for (const e of entities) {
+      const target = e.type === "text_link" ? /t\.me\/[^/]+\/(\d+)/i.exec(e.url ?? "")?.[1] : null;
+      if (!target) continue;
+      const label = linkLabel(text.slice(e.offset, e.offset + e.length));
+      if (!label || /^(return|back)\b/i.test(label)) continue;
+      const set = labels.get(Number(target)) ?? new Set<string>();
+      set.add(label);
+      labels.set(Number(target), set);
+    }
+  }
+  return rows.map((r) => {
+    const title = indexTitle(r.text ?? "");
+    const aliases = [...(labels.get(r.id) ?? [])].filter(
+      (a) => a.toLowerCase() !== title.toLowerCase(),
+    );
+    return { messageId: r.id, title, ...(aliases.length ? { aliases } : {}) };
+  });
 }
 
 export type MessageKind = "index" | "file" | "text" | "missing";

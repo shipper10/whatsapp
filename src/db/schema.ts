@@ -80,6 +80,17 @@ export const driveFiles = pgTable(
   (t) => [uniqueIndex("drive_files_uq").on(t.driveSourceId, t.driveFileId)],
 );
 
+/** An admin's decision that a Drive file is the same document as a Telegram message (the sync could not tell). */
+export const driveMatches = pgTable("drive_matches", {
+  driveFileId: integer("drive_file_id")
+    .primaryKey()
+    .references(() => driveFiles.id, { onDelete: "cascade" }),
+  telegramMessageId: integer("telegram_message_id")
+    .notNull()
+    .references(() => telegramMessages.id, { onDelete: "cascade" }),
+  createdAt: now(),
+});
+
 export const academicNodes = pgTable(
   "academic_nodes",
   {

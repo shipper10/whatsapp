@@ -9,6 +9,20 @@ export interface ParseContext {
 
 const slice = (text: string, offset: number, length: number) => text.slice(offset, offset + length);
 
+/**
+ * An index is a text message that links to other channel messages. Two or more links make one;
+ * a single link is enough when the message says it is an index with #Index (a subject index that
+ * only has "Soon" and a way back to its semester).
+ */
+export function looksLikeIndex(o: {
+  hasMedia: boolean;
+  internalLinks: number;
+  hashtags: string[];
+}) {
+  if (o.hasMedia) return false;
+  return o.internalLinks >= 2 || (o.internalLinks >= 1 && o.hashtags.includes("index"));
+}
+
 /** Pure, metadata-only parsing of one message. Never touches file contents. */
 export function parseMessage(raw: RawTelegramMessage, ctx: ParseContext): TelegramRecord {
   const links: string[] = [];
@@ -63,6 +77,6 @@ export function parseMessage(raw: RawTelegramMessage, ctx: ParseContext): Telegr
     fileSizeBytes: media?.sizeBytes ?? null,
     permalink: ctx.username ? `https://t.me/${ctx.username}/${raw.id}` : null,
     groupedId: raw.groupedId ?? null,
-    isIndex: !media && uniqueInternal.length >= 2,
+    isIndex: looksLikeIndex({ hasMedia: !!media, internalLinks: uniqueInternal.length, hashtags }),
   };
 }

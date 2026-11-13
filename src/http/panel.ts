@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import type { IncomingMessage as HttpReq, ServerResponse } from "node:http";
 import type { BridgeUi } from "./bridgePanel.js";
 import type { Overview } from "./panelData.js";
+import type { ReviewUi } from "./reviewPanel.js";
 import { readBody, tokenMatches } from "./server.js";
 import { BASE, CSS, esc, page } from "./ui.js";
 
@@ -11,6 +12,8 @@ export interface PanelDeps {
   logger: { warn: (o: object, m?: string) => void };
   /** WhatsApp <-> Telegram bridge pages (same sign-in as the rest of the panel). */
   bridge?: BridgeUi;
+  /** Pages for re-classifying files the sync could not place. */
+  review?: ReviewUi;
 }
 
 const sessionCookie = (token: string) =>
@@ -129,6 +132,12 @@ export function createPanel(deps: PanelDeps) {
       const r = await deps.bridge(req, sub.slice("/bridge".length) || "/", url);
       if (r.redirect) res.writeHead(303, { location: r.redirect }).end();
       else html(res, r.code ?? 200, r.body ?? "");
+      return true;
+    }
+    if (deps.review && (sub === "/review" || sub.startsWith("/review/"))) {
+      const r = await deps.review(req, sub.slice("/review".length) || "/", url);
+      if (r.redirect) res.writeHead(303, { location: r.redirect }).end();
+      else html(res, r.code ?? 200, page("Review", r.body ?? ""));
       return true;
     }
     if (get && sub === "") {

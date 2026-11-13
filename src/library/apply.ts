@@ -1,9 +1,10 @@
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { normalizeText } from "../core/normalize/text.js";
 import type { Db } from "../db/client.js";
 import {
   academicNodes,
   driveFiles,
+  driveMatches,
   driveSources,
   resourceNodeLinks,
   resourceSources,
@@ -70,7 +71,10 @@ async function loadInputs(db: Db) {
     folderPath: f.folderPath,
     webViewLink: f.webViewLink,
   }));
-  return { telegram: mergeAlbums(telegram), drive };
+  const matches = new Map(
+    (await db.select().from(driveMatches)).map((m) => [m.driveFileId, m.telegramMessageId]),
+  );
+  return { telegram: mergeAlbums(telegram), drive, matches };
 }
 
 /** Writes a plan to the database. Idempotent; never deletes; respects admin-locked resources. */
@@ -240,7 +244,21 @@ export async function applyPlan(db: Db, plan: LibraryPlan): Promise<ApplyStats> 
   });
 }
 
+/**
+ * Messages synced before the index rule learned about #Index keep a stale flag: set it from what is stored.
+ * Only ever turns the flag on, and only for messages that carry the #Index tag and a channel link.
+ */
+export async function refreshIndexFlags(db: Db): Promise<void> {
+  await db.execute(sql`
+    update telegram_messages
+    set entities_json = jsonb_set(coalesce(entities_json, '{}'::jsonb), '{isIndex}', 'true'::jsonb)
+    where sync_status = 'active' and media_type is null and 'index' = any(hashtags)
+      and jsonb_array_length(coalesce(entities_json->'internalLinkIds', '[]'::jsonb)) >= 1
+      and coalesce((entities_json->>'isIndex')::boolean, false) = false`);
+}
+
 export async function classifyAndApply(db: Db, username: string): Promise<ApplyStats> {
+  await refreshIndexFlags(db);
   const input = await loadInputs(db);
   return applyPlan(db, planLibrary({ username, ...input }));
 }

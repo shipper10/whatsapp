@@ -192,6 +192,8 @@ export interface PlanInput {
   username: string;
   telegram: TgRow[];
   drive: DriveRow[];
+  /** Admin decisions: drive_files.id -> telegram_messages.id of the same document. */
+  matches?: Map<number, number>;
 }
 
 export function planLibrary(input: PlanInput): LibraryPlan {
@@ -366,8 +368,21 @@ export function planLibrary(input: PlanInput): LibraryPlan {
     sameDrive: DriveRow[];
     driveSource: PlanResourceSource;
   }[] = [];
+  const tgByDbId = new Map(tgResources.map((t) => [t.row.dbId, t]));
   for (const d of input.drive) {
     const k = normalizeText(d.name);
+    const chosen = tgByDbId.get(input.matches?.get(d.dbId) ?? -1);
+    if (chosen) {
+      claimed.add(chosen.row.dbId);
+      chosen.res.sources.push({
+        type: "google_drive",
+        recordId: d.dbId,
+        url: d.webViewLink,
+        preferred: false,
+      });
+      chosen.res.searchText = normalizeText(`${chosen.res.searchText} ${d.folderPath ?? ""}`);
+      continue;
+    }
     const tgC = tgByName.get(k) ?? [];
     const sameDrive = driveByName.get(k) ?? [];
     const sizeOk = (t: { row: TgRow }) =>

@@ -56,5 +56,5 @@ tr.l-skip td{opacity:.75}
 
 export function page(title: string, body: string, opts: { refresh?: number } = {}) {
   const refresh = opts.refresh ? `<meta http-equiv="refresh" content="${opts.refresh}">` : "";
-  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}<title>${esc(title)}</title><style>${CSS}</style><header><strong>📚 Library bot</strong><a href="${BASE}">Overview</a><a href="${BASE}/bridge">Bridge</a></header><main>${body}</main></html>`;
+  return `<!doctype html><html lang="en" dir="ltr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}<title>${esc(title)}</title><style>${CSS}</style><header><strong>📚 Library bot</strong><a href="${BASE}">Overview</a><a href="${BASE}/review">Review</a><a href="${BASE}/bridge">Bridge</a></header><main>${body}</main></html>`;
 }

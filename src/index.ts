@@ -29,6 +29,7 @@ import type { DriveClient } from "./drive/types.js";
 import { createBridgeUi } from "./http/bridgePanel.js";
 import { createPanel } from "./http/panel.js";
 import { loadCounts } from "./http/panelData.js";
+import { createReviewUi } from "./http/reviewPanel.js";
 import { createAppServer } from "./http/server.js";
 import { SyncAlerts } from "./jobs/alerts.js";
 import { startKeepAlive } from "./jobs/keepalive.js";
@@ -320,6 +321,10 @@ const server = createAppServer({
         token: env.ADMIN_HTTP_TOKEN,
         logger: log,
         bridge: bridgeUi,
+        review: createReviewUi({
+          db,
+          reclassify: async () => classifyAndApply(db, await channelUsername()),
+        }),
         overview: async () => {
           const st = deliverer.stats();
           const w = baileys?.status();
