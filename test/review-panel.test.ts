@@ -136,6 +136,21 @@ describe("review panel", () => {
     expect(after?.classificationLocked).toBe(true);
   });
 
+  it("lists hand-placed files under Locked and unlocks them", async () => {
+    const [r] = await db.select().from(resources).where(eq(resources.classificationLocked, true));
+    expect(r).toBeTruthy();
+    const page = await get(ui(), "/?kind=locked");
+    expect(page.body).toContain("🔒 locked");
+    expect(page.body).toContain("Unlock");
+    const res = await post(ui(), "/unlock", { id: String(r?.id), kind: "locked" });
+    expect(flash(res.redirect)).toContain("unlocked");
+    const [after] = await db
+      .select()
+      .from(resources)
+      .where(eq(resources.id, r?.id ?? 0));
+    expect(after?.classificationLocked).toBe(false);
+  });
+
   it("suggests places for an unplaced file and searches Telegram files by name for a Drive file", async () => {
     const [subject] = await db
       .select({ name: academicNodes.name })

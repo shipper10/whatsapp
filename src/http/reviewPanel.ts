@@ -11,6 +11,7 @@ import {
   resources,
   telegramMessages,
 } from "../db/schema.js";
+import { exclusive } from "../library/apply.js";
 import { scoreTitle, words } from "../library/fuzzy.js";
 import type { BridgeUiResult } from "./bridgePanel.js";
 import { readBody } from "./server.js";
@@ -24,7 +25,7 @@ export interface ReviewDeps {
 
 const here = `${BASE}/review`;
 const PAGE = 20;
-const KINDS = ["all", "telegram", "drive"] as const;
+const KINDS = ["all", "telegram", "drive", "locked"] as const;
 type Kind = (typeof KINDS)[number];
 
 interface Flash {
@@ -90,11 +91,16 @@ function placeGuesses(name: string, nodes: Suggestion[]): Suggestion[] {
 }
 
 async function loadRows(db: Db, kind: Kind, page: number) {
-  const where = and(
-    eq(resources.isActive, true),
-    inArray(resources.classificationStatus, ["needs_review", "uncategorized"]),
-    kind === "all" ? undefined : like(resources.resourceKey, kind === "drive" ? "drive:%" : "tg:%"),
-  );
+  const where =
+    kind === "locked"
+      ? and(eq(resources.isActive, true), eq(resources.classificationLocked, true))
+      : and(
+          eq(resources.isActive, true),
+          inArray(resources.classificationStatus, ["needs_review", "uncategorized"]),
+          kind === "all"
+            ? undefined
+            : like(resources.resourceKey, kind === "drive" ? "drive:%" : "tg:%"),
+        );
   const [{ n } = { n: 0 }] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(resources)
@@ -207,42 +213,47 @@ async function view(
     const isDrive = r.key.startsWith("drive:");
     const url = urlOf.get(r.id);
     const guess = r.node ? (nodes.byId.get(r.node) ?? "") : "";
-    const cands = (similar.get(r.id) ?? [])
-      .map(
-        (c) =>
-          `<form class="inline" method="post" action="${here}/merge"><input type="hidden" name="drive" value="${r.id}"><input type="hidden" name="telegram" value="${c.id}">${back}<button class="btn sm ghost" title="Same file as this Telegram upload">🔗 ${esc(c.name.slice(0, 50))}</button></form>`,
-      )
-      .join(" ");
-    const picks = isDrive
+    const locked = kind === "locked";
+    const cands = locked
       ? ""
-      : placeGuesses(r.name, nodes.labels)
-          .filter((g) => g.label !== guess)
+      : (similar.get(r.id) ?? [])
           .map(
-            (g) =>
-              `<form class="inline" method="post" action="${here}/assign"><input type="hidden" name="id" value="${r.id}"><input type="hidden" name="node" value="${esc(g.label)}">${back}<button class="btn sm ghost">📌 ${esc(g.label)}</button></form>`,
+            (c) =>
+              `<form class="inline" method="post" action="${here}/merge"><input type="hidden" name="drive" value="${r.id}"><input type="hidden" name="telegram" value="${c.id}">${back}<button class="btn sm ghost" title="Same file as this Telegram upload">🔗 ${esc(c.name.slice(0, 50))}</button></form>`,
           )
           .join(" ");
+    const picks =
+      isDrive || locked
+        ? ""
+        : placeGuesses(r.name, nodes.labels)
+            .filter((g) => g.label !== guess)
+            .map(
+              (g) =>
+                `<form class="inline" method="post" action="${here}/assign"><input type="hidden" name="id" value="${r.id}"><input type="hidden" name="node" value="${esc(g.label)}">${back}<button class="btn sm ghost">📌 ${esc(g.label)}</button></form>`,
+            )
+            .join(" ");
     return `<div class="card">
 <div class="rule"><div class="main"><span class="route">${esc(r.name)}</span>
-<div class="chips"><span class="badge ${r.status === "uncategorized" ? "bad" : "warn"}">${esc(r.status)}</span><span class="badge">${isDrive ? "Drive" : "Telegram"}</span><span class="badge off">#${r.id}</span>${url ? `<a href="${esc(url)}" rel="noreferrer noopener" target="_blank">open ↗</a>` : ""}</div></div></div>
+<div class="chips">${locked ? '<span class="badge ok">🔒 locked</span>' : `<span class="badge ${r.status === "uncategorized" ? "bad" : "warn"}">${esc(r.status)}</span>`}<span class="badge">${isDrive ? "Drive" : "Telegram"}</span><span class="badge off">#${r.id}</span>${url ? `<a href="${esc(url)}" rel="noreferrer noopener" target="_blank">open ↗</a>` : ""}</div></div></div>
 <form method="post" action="${here}/assign" class="row"><input type="hidden" name="id" value="${r.id}">${back}
 <input name="node" list="nodes" value="${esc(guess)}" placeholder="Type to choose where it belongs…" autocomplete="off" required>
-<button>${guess ? "✔ Assign" : "Assign"}</button></form>
+<button>${locked ? "Change place" : guess ? "✔ Assign" : "Assign"}</button>${locked ? `<button class="btn ghost" formaction="${here}/unlock" formnovalidate title="Let the sync decide again">🔓 Unlock</button>` : ""}</form>
 ${picks ? `<p class="muted" style="margin:.5rem 0 .2rem">Looks like it belongs to:</p><div class="chips">${picks}</div>` : ""}
-${isDrive ? `<p class="muted" style="margin:.5rem 0 .2rem">${cands ? "Is this the same file as one of these Telegram uploads? Click to join them:" : "No similar Telegram upload found automatically."}</p><div class="chips">${cands}</div><form method="get" action="${here}" class="row"><input type="hidden" name="kind" value="drive"><input type="hidden" name="page" value="${page}"><input type="hidden" name="find" value="${r.id}"><input name="q" value="${esc(r.name.split(/\s+/).slice(0, 2).join(" "))}" placeholder="Search Telegram files by name"><button class="btn ghost">🔍 Search Telegram files</button></form>` : ""}
+${isDrive && !locked ? `<p class="muted" style="margin:.5rem 0 .2rem">${cands ? "Is this the same file as one of these Telegram uploads? Click to join them:" : "No similar Telegram upload found automatically."}</p><div class="chips">${cands}</div><form method="get" action="${here}" class="row"><input type="hidden" name="kind" value="drive"><input type="hidden" name="page" value="${page}"><input type="hidden" name="find" value="${r.id}"><input name="q" value="${esc(r.name.split(/\s+/).slice(0, 2).join(" "))}" placeholder="Search Telegram files by name"><button class="btn ghost">🔍 Search Telegram files</button></form>` : ""}
 </div>`;
   };
 
   const pages = Math.max(1, Math.ceil(total / PAGE));
-  const pager = `<div class="pager">${page > 1 ? `<a class="btn ghost sm" href="${here}?kind=${kind}&page=${page - 1}">← Previous</a>` : ""}<span class="muted">Page ${page} of ${pages} · ${total} to review</span>${page < pages ? `<a class="btn ghost sm" href="${here}?kind=${kind}&page=${page + 1}">Next →</a>` : ""}</div>`;
+  const pager = `<div class="pager">${page > 1 ? `<a class="btn ghost sm" href="${here}?kind=${kind}&page=${page - 1}">← Previous</a>` : ""}<span class="muted">Page ${page} of ${pages} · ${total} ${kind === "locked" ? "locked" : "to review"}</span>${page < pages ? `<a class="btn ghost sm" href="${here}?kind=${kind}&page=${page + 1}">Next →</a>` : ""}</div>`;
   return `${flash ? `<div class="flash${flash.err ? " err" : ""}">${esc(flash.text)}</div>` : ""}
 <h1>Review</h1>
+${kind === "locked" ? '<div class="card"><p style="margin:0"><b>Locked files</b> are the ones you placed by hand (here or with /assign). Syncs never move them. If you chose wrongly, pick the right place and press <b>Change place</b>, or press <b>🔓 Unlock</b> to let the sync decide again (it may land in review).</p></div>' : ""}
 <div class="card"><p style="margin:0"><b>Telegram files:</b> the sync could not tell which subject they belong to. Click a 📌 suggestion, or type the subject (or semester) in the box and press Assign. It is then locked, so later syncs keep it there.</p>
 <p style="margin:.5rem 0 0"><b>Drive files:</b> these are Drive files with no matching Telegram upload. If the same document exists in the channel, click 🔗 on the right one (or use 🔍 to search by name) and the two become one file in the library. If it is only on Drive, just Assign it to a subject.</p></div>
 ${finder}
-<div class="tabs">${tab("all", kind, "All")}${tab("telegram", kind, "Telegram")}${tab("drive", kind, "Drive")}</div>
+<div class="tabs">${tab("all", kind, "All")}${tab("telegram", kind, "Telegram")}${tab("drive", kind, "Drive")}${tab("locked", kind, "🔒 Locked")}</div>
 <datalist id="nodes">${nodes.labels.map((l) => `<option value="${esc(l.label)}"></option>`).join("")}</datalist>
-${rows.length ? rows.map(item).join("") : '<div class="card empty">✅ Nothing to review here.</div>'}
+${rows.length ? rows.map(item).join("") : '<div class="card empty">${kind === "locked" ? "No file has been placed by hand yet." : "✅ Nothing to review here."}</div>'}
 ${pager}`;
 }
 
@@ -268,25 +279,42 @@ export function createReviewUi(deps: ReviewDeps) {
     const nid = nodes.byLabel.get((f.get("node") ?? "").trim());
     if (!rid || !nid)
       return redirect(f, { text: "Pick a place from the suggestions list.", err: true });
-    const done = await db.transaction(async (tx) => {
-      const res = await tx
-        .update(resources)
-        .set({
-          academicNodeId: nid,
-          classificationStatus: "classified",
-          classificationLocked: true,
-          updatedAt: new Date(),
-        })
-        .where(eq(resources.id, rid))
-        .returning({ id: resources.id });
-      if (!res.length) return false;
-      await tx.delete(resourceNodeLinks).where(eq(resourceNodeLinks.resourceId, rid));
-      await tx.insert(resourceNodeLinks).values({ resourceId: rid, nodeId: nid });
-      return true;
-    });
+    const done = await exclusive(() =>
+      db.transaction(async (tx) => {
+        const res = await tx
+          .update(resources)
+          .set({
+            academicNodeId: nid,
+            classificationStatus: "classified",
+            classificationLocked: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(resources.id, rid))
+          .returning({ id: resources.id });
+        if (!res.length) return false;
+        await tx.delete(resourceNodeLinks).where(eq(resourceNodeLinks.resourceId, rid));
+        await tx.insert(resourceNodeLinks).values({ resourceId: rid, nodeId: nid });
+        return true;
+      }),
+    );
     if (!done) return redirect(f, { text: "That file no longer exists.", err: true });
     await audit("assign", { resourceId: rid, nodeId: nid, via: "panel" });
     return redirect(f, { text: `✅ #${rid} → ${nodes.byId.get(nid)}` });
+  }
+
+  async function unlock(f: URLSearchParams) {
+    const rid = Number(f.get("id"));
+    const res = await exclusive(() =>
+      db
+        .update(resources)
+        .set({ classificationLocked: false, updatedAt: new Date() })
+        .where(eq(resources.id, rid))
+        .returning({ id: resources.id }),
+    );
+    if (!res.length) return redirect(f, { text: "That file no longer exists.", err: true });
+    await audit("unlock", { resourceId: rid, via: "panel" });
+    await deps.reclassify();
+    return redirect(f, { text: `✅ #${rid} unlocked: the sync placed it again` });
   }
 
   async function merge(f: URLSearchParams) {
@@ -317,6 +345,7 @@ export function createReviewUi(deps: ReviewDeps) {
       const f = new URLSearchParams((await readBody(req)) ?? "");
       if (sub === "/assign") return assign(f);
       if (sub === "/merge") return merge(f);
+      if (sub === "/unlock") return unlock(f);
       return { code: 404, body: "Not found" };
     }
     if (sub !== "/" && sub !== "") return { code: 404, body: "Not found" };

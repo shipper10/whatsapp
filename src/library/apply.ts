@@ -261,13 +261,17 @@ export async function refreshIndexFlags(db: Db): Promise<void> {
 // same rows in different orders and deadlock, so they run one after the other.
 let rebuilding: Promise<unknown> = Promise.resolve();
 
+/** Runs `fn` after any rebuild in progress, and holds later rebuilds until it is done. */
+export function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const next = rebuilding.then(fn, fn);
+  rebuilding = next.catch(() => undefined);
+  return next;
+}
+
 export function classifyAndApply(db: Db, username: string): Promise<ApplyStats> {
-  const run = async () => {
+  return exclusive(async () => {
     await refreshIndexFlags(db);
     const input = await loadInputs(db);
     return applyPlan(db, planLibrary({ username, ...input }));
-  };
-  const next = rebuilding.then(run, run);
-  rebuilding = next.catch(() => undefined);
-  return next;
+  });
 }
