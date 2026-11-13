@@ -3,6 +3,7 @@ import { and, eq, like } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../src/db/client.js";
 import {
+  academicNodes,
   driveFiles,
   driveSources,
   resourceSources,
@@ -135,11 +136,28 @@ describe("review panel", () => {
     expect(after?.classificationLocked).toBe(true);
   });
 
+  it("suggests places for an unplaced file and searches Telegram files by name for a Drive file", async () => {
+    const [subject] = await db
+      .select({ name: academicNodes.name })
+      .from(academicNodes)
+      .where(eq(academicNodes.nodeType, "subject"))
+      .limit(1);
+    await db.insert(resources).values({
+      resourceKey: "tg:1:777777",
+      displayName: `${subject?.name} Lecture 9`,
+      classificationStatus: "uncategorized",
+    });
+    const html = (await get(ui(), "/?kind=telegram")).body ?? "";
+    expect(html).toContain("Looks like it belongs to");
+    expect(html).toContain("📌");
+  });
+
   it("joins a Drive file to the Telegram upload it duplicates and keeps it across syncs", async () => {
     const [tg] = await db
       .select({ id: resources.id, name: resources.displayName })
       .from(resources)
-      .where(like(resources.resourceKey, "tg:%"))
+      .innerJoin(resourceSources, eq(resourceSources.resourceId, resources.id))
+      .where(and(like(resources.resourceKey, "tg:%"), eq(resourceSources.sourceType, "telegram")))
       .limit(1);
     const [src] = await db
       .insert(driveSources)
@@ -156,6 +174,10 @@ describe("review panel", () => {
     expect(drv).toBeTruthy();
     const page = await get(ui(), "/?kind=drive");
     expect(page.body).toContain("Drive");
+    const word = (tg?.name ?? "").split(/\s+/)[0] ?? "";
+    const found = await get(ui(), `/?kind=drive&find=${drv?.id}&q=${encodeURIComponent(word)}`);
+    expect(found.body).toContain("Find the Telegram file for");
+    expect(found.body).toContain("Same file");
     const res = await post(ui(), "/merge", { drive: String(drv?.id), telegram: String(tg?.id) });
     expect(flash(res.redirect)).toContain("✅");
     const gone = await db

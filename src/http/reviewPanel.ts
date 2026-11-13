@@ -73,6 +73,22 @@ const similarity = (a: string, b: string) => {
   return Math.max(scoreTitle(wa, strip(b)), scoreTitle(wb, strip(a)));
 };
 
+type Suggestion = { id: number; label: string };
+
+/** Places whose whole name appears in the file's name ("Cell Biology Lecture 7" -> Cell Biology), most specific first. */
+function placeGuesses(name: string, nodes: Suggestion[]): Suggestion[] {
+  return nodes
+    .map((n) => ({
+      n,
+      score: scoreTitle(words(n.label.split(" › ").pop() ?? ""), name),
+      len: words(n.label).length,
+    }))
+    .filter((x) => x.score >= 0.85)
+    .sort((a, b) => b.len - a.len)
+    .slice(0, 3)
+    .map((x) => x.n);
+}
+
 async function loadRows(db: Db, kind: Kind, page: number) {
   const where = and(
     eq(resources.isActive, true),
@@ -135,7 +151,33 @@ async function lookalikes(db: Db, driveNames: { id: number; name: string }[]) {
 const tab = (kind: Kind, on: Kind, label: string, n?: number) =>
   `<a class="${kind === on ? "on" : ""}" href="${here}?kind=${kind}">${label}${n === undefined ? "" : ` (${n})`}</a>`;
 
-async function view(db: Db, kind: Kind, page: number, flash?: Flash) {
+/** Telegram uploads (without a Drive copy yet) whose name contains what the admin typed. */
+async function findTelegram(db: Db, q: string) {
+  const terms = words(q).slice(0, 5);
+  if (terms.length === 0) return [];
+  const rows = await db
+    .select({ id: resources.id, name: resources.displayName, text: resources.searchText })
+    .from(resources)
+    .where(
+      and(
+        eq(resources.isActive, true),
+        like(resources.resourceKey, "tg:%"),
+        sql`not exists (select 1 from resource_sources s where s.resource_id = ${resources.id} and s.source_type = 'google_drive')`,
+        ...terms.map((t) => sql`${resources.searchText} like ${`%${t.replace(/[%_\\]/g, "")}%`}`),
+      ),
+    )
+    .orderBy(asc(resources.displayName))
+    .limit(15);
+  return rows;
+}
+
+async function view(
+  db: Db,
+  kind: Kind,
+  page: number,
+  flash?: Flash,
+  find?: { id: number; q: string },
+) {
   const [{ total, rows, urlOf }, nodes] = await Promise.all([
     loadRows(db, kind, page),
     nodeLabels(db),
@@ -145,6 +187,20 @@ async function view(db: Db, kind: Kind, page: number, flash?: Flash) {
     db,
     drive.map((r) => ({ id: r.id, name: r.name })),
   );
+  const finder = find
+    ? await (async () => {
+        const [target] = await db
+          .select({ name: resources.displayName })
+          .from(resources)
+          .where(eq(resources.id, find.id));
+        const hits = await findTelegram(db, find.q);
+        const btn = (h: { id: number; name: string }) =>
+          `<form class="inline" method="post" action="${here}/merge"><input type="hidden" name="drive" value="${find.id}"><input type="hidden" name="telegram" value="${h.id}"><input type="hidden" name="kind" value="${kind}"><input type="hidden" name="page" value="${page}"><button class="btn sm">🔗 Same file</button></form>`;
+        return `<div class="card"><h2>Find the Telegram file for: ${esc(target?.name ?? "")}</h2>
+<form method="get" action="${here}" class="row"><input type="hidden" name="kind" value="drive"><input type="hidden" name="page" value="${page}"><input type="hidden" name="find" value="${find.id}"><input name="q" value="${esc(find.q)}" placeholder="Part of the file name, e.g. krebs" required><button>Search</button></form>
+<table>${hits.map((h) => `<tr><td>${esc(h.name)}</td><td>${btn(h)}</td></tr>`).join("") || '<tr><td class="muted">No Telegram file contains all those words. Try fewer or shorter words.</td></tr>'}</table></div>`;
+      })()
+    : "";
   const back = `<input type="hidden" name="kind" value="${kind}"><input type="hidden" name="page" value="${page}">`;
 
   const item = (r: (typeof rows)[number]) => {
@@ -157,13 +213,23 @@ async function view(db: Db, kind: Kind, page: number, flash?: Flash) {
           `<form class="inline" method="post" action="${here}/merge"><input type="hidden" name="drive" value="${r.id}"><input type="hidden" name="telegram" value="${c.id}">${back}<button class="btn sm ghost" title="Same file as this Telegram upload">🔗 ${esc(c.name.slice(0, 50))}</button></form>`,
       )
       .join(" ");
+    const picks = isDrive
+      ? ""
+      : placeGuesses(r.name, nodes.labels)
+          .filter((g) => g.label !== guess)
+          .map(
+            (g) =>
+              `<form class="inline" method="post" action="${here}/assign"><input type="hidden" name="id" value="${r.id}"><input type="hidden" name="node" value="${esc(g.label)}">${back}<button class="btn sm ghost">📌 ${esc(g.label)}</button></form>`,
+          )
+          .join(" ");
     return `<div class="card">
 <div class="rule"><div class="main"><span class="route">${esc(r.name)}</span>
 <div class="chips"><span class="badge ${r.status === "uncategorized" ? "bad" : "warn"}">${esc(r.status)}</span><span class="badge">${isDrive ? "Drive" : "Telegram"}</span><span class="badge off">#${r.id}</span>${url ? `<a href="${esc(url)}" rel="noreferrer noopener" target="_blank">open ↗</a>` : ""}</div></div></div>
 <form method="post" action="${here}/assign" class="row"><input type="hidden" name="id" value="${r.id}">${back}
 <input name="node" list="nodes" value="${esc(guess)}" placeholder="Type to choose where it belongs…" autocomplete="off" required>
 <button>${guess ? "✔ Assign" : "Assign"}</button></form>
-${isDrive ? `<p class="muted" style="margin:.5rem 0 .2rem">${cands ? "Same file as a Telegram upload?" : "No similar Telegram file found."}</p><div class="chips">${cands}</div>` : ""}
+${picks ? `<p class="muted" style="margin:.5rem 0 .2rem">Looks like it belongs to:</p><div class="chips">${picks}</div>` : ""}
+${isDrive ? `<p class="muted" style="margin:.5rem 0 .2rem">${cands ? "Is this the same file as one of these Telegram uploads? Click to join them:" : "No similar Telegram upload found automatically."}</p><div class="chips">${cands}</div><form method="get" action="${here}" class="row"><input type="hidden" name="kind" value="drive"><input type="hidden" name="page" value="${page}"><input type="hidden" name="find" value="${r.id}"><input name="q" value="${esc(r.name.split(/\s+/).slice(0, 2).join(" "))}" placeholder="Search Telegram files by name"><button class="btn ghost">🔍 Search Telegram files</button></form>` : ""}
 </div>`;
   };
 
@@ -171,7 +237,9 @@ ${isDrive ? `<p class="muted" style="margin:.5rem 0 .2rem">${cands ? "Same file 
   const pager = `<div class="pager">${page > 1 ? `<a class="btn ghost sm" href="${here}?kind=${kind}&page=${page - 1}">← Previous</a>` : ""}<span class="muted">Page ${page} of ${pages} · ${total} to review</span>${page < pages ? `<a class="btn ghost sm" href="${here}?kind=${kind}&page=${page + 1}">Next →</a>` : ""}</div>`;
   return `${flash ? `<div class="flash${flash.err ? " err" : ""}">${esc(flash.text)}</div>` : ""}
 <h1>Review</h1>
-<p class="muted">Files the sync could not place. Choose where each belongs (start typing a subject or semester) — it is then locked so later syncs keep it there. A Drive file that has a Telegram twin can be joined to it with one click.</p>
+<div class="card"><p style="margin:0"><b>Telegram files:</b> the sync could not tell which subject they belong to. Click a 📌 suggestion, or type the subject (or semester) in the box and press Assign. It is then locked, so later syncs keep it there.</p>
+<p style="margin:.5rem 0 0"><b>Drive files:</b> these are Drive files with no matching Telegram upload. If the same document exists in the channel, click 🔗 on the right one (or use 🔍 to search by name) and the two become one file in the library. If it is only on Drive, just Assign it to a subject.</p></div>
+${finder}
 <div class="tabs">${tab("all", kind, "All")}${tab("telegram", kind, "Telegram")}${tab("drive", kind, "Drive")}</div>
 <datalist id="nodes">${nodes.labels.map((l) => `<option value="${esc(l.label)}"></option>`).join("")}</datalist>
 ${rows.length ? rows.map(item).join("") : '<div class="card empty">✅ Nothing to review here.</div>'}
@@ -260,6 +328,9 @@ export function createReviewUi(deps: ReviewDeps) {
         kindOf(url.searchParams.get("kind")),
         pageOf(url.searchParams.get("page")),
         flash,
+        Number(url.searchParams.get("find"))
+          ? { id: Number(url.searchParams.get("find")), q: url.searchParams.get("q") ?? "" }
+          : undefined,
       ),
     };
   };

@@ -257,8 +257,17 @@ export async function refreshIndexFlags(db: Db): Promise<void> {
       and coalesce((entities_json->>'isIndex')::boolean, false) = false`);
 }
 
-export async function classifyAndApply(db: Db, username: string): Promise<ApplyStats> {
-  await refreshIndexFlags(db);
-  const input = await loadInputs(db);
-  return applyPlan(db, planLibrary({ username, ...input }));
+// Two rebuilds at once (Telegram and Drive finishing together, or a panel action) would update the
+// same rows in different orders and deadlock, so they run one after the other.
+let rebuilding: Promise<unknown> = Promise.resolve();
+
+export function classifyAndApply(db: Db, username: string): Promise<ApplyStats> {
+  const run = async () => {
+    await refreshIndexFlags(db);
+    const input = await loadInputs(db);
+    return applyPlan(db, planLibrary({ username, ...input }));
+  };
+  const next = rebuilding.then(run, run);
+  rebuilding = next.catch(() => undefined);
+  return next;
 }

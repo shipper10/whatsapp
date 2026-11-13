@@ -1,3 +1,4 @@
+import { describeError } from "../core/errors.js";
 export type JobKind = "telegram" | "drive";
 
 export interface JobDeps {
@@ -69,7 +70,7 @@ export class SyncScheduler {
       report.ok = true;
       this.d.logger.info({ kind, ...report.summary }, "sync finished");
     } catch (err) {
-      report.error = err instanceof Error ? err.message : String(err);
+      report.error = describeError(err);
       this.d.logger.error({ kind, error: report.error }, "sync failed");
     }
     report.finishedAt = now();
