@@ -61,8 +61,27 @@ const toRule = (r: typeof bridgeRules.$inferSelect): BridgeRule => ({
 export class BridgeStore {
   constructor(private readonly db: Db) {}
 
+  /**
+   * Rules are read for every incoming message, so they are kept in memory. Every write in this class
+   * drops the cache; the short TTL only covers edits made by another process.
+   */
+  private rulesCache?: { at: number; rules: BridgeRule[] };
+  private static readonly RULES_TTL_MS = 5 * 60_000;
+  /** Last known (title, kind, parent) per chat, so unchanged chats are not written again. */
+  private chatSeen?: Map<string, string>;
+
+  private dropRulesCache() {
+    this.rulesCache = undefined;
+  }
+
   async rules(): Promise<BridgeRule[]> {
-    return (await this.db.select().from(bridgeRules).orderBy(asc(bridgeRules.id))).map(toRule);
+    const c = this.rulesCache;
+    if (c && Date.now() - c.at < BridgeStore.RULES_TTL_MS) return [...c.rules];
+    const rules = (await this.db.select().from(bridgeRules).orderBy(asc(bridgeRules.id))).map(
+      toRule,
+    );
+    this.rulesCache = { at: Date.now(), rules };
+    return [...rules];
   }
 
   async addRule(r: NewRule): Promise<number> {
@@ -71,12 +90,14 @@ export class BridgeStore {
       .insert(bridgeRules)
       .values(values)
       .returning({ id: bridgeRules.id });
+    this.dropRulesCache();
     return (row as { id: number }).id;
   }
 
   async updateRule(id: number, r: NewRule) {
     const { id: _ignored, ...values } = r as NewRule & { id?: number };
     await this.db.update(bridgeRules).set(values).where(eq(bridgeRules.id, id));
+    this.dropRulesCache();
   }
 
   async rule(id: number): Promise<BridgeRule | undefined> {
@@ -85,6 +106,7 @@ export class BridgeStore {
 
   async setEnabled(id: number, enabled: boolean) {
     await this.db.update(bridgeRules).set({ enabled }).where(eq(bridgeRules.id, id));
+    this.dropRulesCache();
   }
 
   async deleteRule(id: number) {
@@ -97,6 +119,7 @@ export class BridgeStore {
       await this.db.delete(bridgeLogs).where(eq(bridgeLogs.ruleId, rid));
     }
     await this.db.delete(bridgeContactTopics).where(eq(bridgeContactTopics.ruleId, id));
+    this.dropRulesCache();
   }
 
   // ---- "all private chats" rules: one topic per person
@@ -178,6 +201,7 @@ export class BridgeStore {
 
   async setLogEnabled(id: number, logEnabled: boolean) {
     await this.db.update(bridgeRules).set({ logEnabled }).where(eq(bridgeRules.id, id));
+    this.dropRulesCache();
   }
 
   // ---- per-rule log
@@ -271,7 +295,24 @@ export class BridgeStore {
   }
 
   async upsertChats(chats: ChatInfo[]) {
+    const keyOf = (c: ChatInfo) =>
+      `${c.accountId ?? 0}|${c.platform}|${c.chatId}|${c.topicId ?? ""}`;
+    const sigOf = (c: ChatInfo) => `${c.title}|${c.kind}|${c.parentId ?? ""}`;
+    if (!this.chatSeen) {
+      // One read per process; afterwards only new or renamed chats are written.
+      const rows = await this.db.select().from(bridgeChats);
+      this.chatSeen = new Map(
+        rows.map((r) => [
+          `${r.accountId}|${r.platform}|${r.chatId}|${r.topicId}`,
+          `${r.title}|${r.kind}|${r.parentId ?? ""}`,
+        ]),
+      );
+    }
+    const seen = this.chatSeen;
     for (const c of chats) {
+      const key = keyOf(c);
+      const sig = sigOf(c);
+      if (seen.get(key) === sig) continue;
       await this.db
         .insert(bridgeChats)
         .values({
@@ -297,6 +338,7 @@ export class BridgeStore {
             updatedAt: new Date(),
           },
         });
+      seen.set(key, sig);
     }
   }
 

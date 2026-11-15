@@ -394,7 +394,7 @@ let bridgeTimer: NodeJS.Timeout | undefined;
 if (bridgeRefresh) {
   const refresh = bridgeRefresh;
   setTimeout(() => void refresh(), 30_000).unref();
-  bridgeTimer = setInterval(() => void refresh(), 30 * 60_000);
+  bridgeTimer = setInterval(() => void refresh(), 6 * 3600_000);
   bridgeTimer.unref();
 }
 if (env.ENABLE_SCHEDULER) scheduler.start();
