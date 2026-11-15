@@ -34,7 +34,7 @@ import { createAppServer } from "./http/server.js";
 import { SyncAlerts } from "./jobs/alerts.js";
 import { startKeepAlive } from "./jobs/keepalive.js";
 import { SyncScheduler } from "./jobs/scheduler.js";
-import { classifyAndApply } from "./library/apply.js";
+import { classifyAndApply, classifyAndApplyIfChanged } from "./library/apply.js";
 import { DbLibrary } from "./library/dbLibrary.js";
 import { createLogger } from "./logger.js";
 import { sendNewFilesDigest } from "./notify/digest.js";
@@ -180,7 +180,7 @@ const scheduler = new SyncScheduler({
     await alerts.onReport(report);
     if (report.ok) await sendNewFilesDigest({ db, provider, settings, logger: log });
   },
-  classify: async () => classifyAndApply(db, await channelUsername()),
+  classify: async () => classifyAndApplyIfChanged(db, await channelUsername()),
 });
 
 const adminHook = createAdminHook({
@@ -323,7 +323,7 @@ const server = createAppServer({
         bridge: bridgeUi,
         review: createReviewUi({
           db,
-          reclassify: async () => classifyAndApply(db, await channelUsername()),
+          reclassify: async () => classifyAndApplyIfChanged(db, await channelUsername()),
         }),
         overview: async () => {
           const st = deliverer.stats();
@@ -394,7 +394,7 @@ let bridgeTimer: NodeJS.Timeout | undefined;
 if (bridgeRefresh) {
   const refresh = bridgeRefresh;
   setTimeout(() => void refresh(), 30_000).unref();
-  bridgeTimer = setInterval(() => void refresh(), 30 * 60_000);
+  bridgeTimer = setInterval(() => void refresh(), 6 * 3600_000);
   bridgeTimer.unref();
 }
 if (env.ENABLE_SCHEDULER) scheduler.start();

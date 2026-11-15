@@ -268,10 +268,60 @@ export function exclusive<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/**
+ * Cheap change detector: the database hashes the inputs of the classifier and returns one short string,
+ * so nothing big crosses the wire. (Reading every message with its entity JSON after each sync used to
+ * be the main source of database egress on the free plan.)
+ */
+async function inputFingerprint(db: Db, username: string): Promise<string> {
+  const res = await db.execute(sql`
+    select
+      (select count(*)::text || ':' || coalesce(sum(hashtextextended(
+         telegram_message_id::text || '|' || coalesce(text_or_caption, '') || '|' || coalesce(file_name, '') || '|' ||
+         coalesce(media_type, '') || '|' || coalesce(file_size_bytes::text, '') || '|' ||
+         coalesce(edit_date::text, '') || '|' || coalesce(hashtags::text, '') || '|' || coalesce(entities_json::text, ''), 0))::text, '0')
+       from telegram_messages where sync_status = 'active') as tg,
+      (select count(*)::text || ':' || coalesce(sum(hashtextextended(
+         f.id::text || '|' || f.name || '|' || coalesce(f.size_bytes::text, '') || '|' ||
+         coalesce(f.modified_time::text, '') || '|' || coalesce(f.folder_path, ''), 0))::text, '0')
+       from drive_files f join drive_sources s on s.id = f.drive_source_id
+       where f.sync_status = 'active' and s.enabled = true) as dr,
+      (select count(*)::text || ':' || coalesce(sum(drive_file_id + telegram_message_id), 0)::text
+       from drive_matches) as dm
+  `);
+  const row = (res as unknown as { rows: Record<string, string>[] }).rows[0] ?? {};
+  return `${username}|${row.tg}|${row.dr}|${row.dm}`;
+}
+
+let lastFingerprint: string | null = null;
+
+/** Always rebuilds (admin actions, tests). */
 export function classifyAndApply(db: Db, username: string): Promise<ApplyStats> {
   return exclusive(async () => {
     await refreshIndexFlags(db);
+    const fp = await inputFingerprint(db, username);
     const input = await loadInputs(db);
-    return applyPlan(db, planLibrary({ username, ...input }));
+    const stats = await applyPlan(db, planLibrary({ username, ...input }));
+    lastFingerprint = fp;
+    return stats;
+  });
+}
+
+/**
+ * Used after each scheduled sync: does nothing when the inputs are identical to the last successful
+ * rebuild (the common case when a sync found nothing new), so the whole table is not re-read every few minutes.
+ */
+export function classifyAndApplyIfChanged(
+  db: Db,
+  username: string,
+): Promise<ApplyStats | { skipped: true }> {
+  return exclusive(async () => {
+    await refreshIndexFlags(db);
+    const fp = await inputFingerprint(db, username);
+    if (fp === lastFingerprint) return { skipped: true as const };
+    const input = await loadInputs(db);
+    const stats = await applyPlan(db, planLibrary({ username, ...input }));
+    lastFingerprint = fp;
+    return stats;
   });
 }
