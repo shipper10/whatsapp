@@ -1108,3 +1108,49 @@ describe("dashboard: all private chats", () => {
     expect(page.body).toContain("all private chats");
   });
 });
+
+describe("second loop guard (by content)", () => {
+  it("does not send a copy the bridge just wrote back, even when its id is unknown", async () => {
+    const { store, wa, tg, svc } = await setup();
+    await store.addRule(rule({ senderMode: "saved" }));
+    await store.addRule(
+      rule({
+        id: 2,
+        srcPlatform: "telegram",
+        srcChatId: "-100",
+        srcTopicId: "7",
+        dstPlatform: "whatsapp",
+        dstChatId: "g1@g.us",
+        dstTopicId: "",
+        forwardOwn: true,
+      }),
+    );
+    await svc.handle(msg({ text: "a long enough message" }));
+    const sent = tg.sent[0]?.out.text as string;
+    expect(sent).toContain("a long enough message");
+    // Telegram reports the copy under an id the bridge never stored
+    await svc.handle(
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        topicId: "7",
+        messageId: "unknown-id",
+        fromMe: true,
+        text: sent,
+      }),
+    );
+    expect(wa.sent).toHaveLength(0);
+    // a genuinely new message of mine still goes through
+    await svc.handle(
+      msg({
+        platform: "telegram",
+        chatId: "-100",
+        topicId: "7",
+        messageId: "mine",
+        fromMe: true,
+        text: "something else entirely",
+      }),
+    );
+    expect(wa.sent).toHaveLength(1);
+  });
+});

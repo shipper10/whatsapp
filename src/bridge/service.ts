@@ -115,6 +115,12 @@ export class BridgeService {
   private readonly lanes = new Map<string, Promise<unknown>>();
   /** Sends in progress per destination chat; an own-account event for that chat may be the echo of one. */
   private readonly inflight = new Map<string, number>();
+  /** What the bridge just wrote where (second loop guard, by content): key -> expiry time. */
+  private readonly recentOut = new Map<string, number>();
+  private echoText(platform: Platform, chatId: string, text: string | undefined) {
+    const t = (text ?? "").replace(/\s+/g, " ").trim();
+    return t.length >= 6 ? `${platform}:${chatId}:${t}` : undefined;
+  }
   private readonly problems_: BridgeProblem[] = [];
   private readonly activity_: BridgeActivity[] = [];
   private readonly sleep: (ms: number) => Promise<void>;
@@ -331,7 +337,11 @@ export class BridgeService {
       for (let i = 0; i < 240 && (this.inflight.get(`${msg.platform}:${msg.chatId}`) ?? 0) > 0; i++)
         await this.sleep(500); // a large upload can finish long after its echo arrived
     }
-    if (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) {
+    const sameText = msg.fromMe ? this.echoText(msg.platform, msg.chatId, msg.text) : undefined;
+    if (
+      (await store.isBridged(msg.platform, msg.chatId, msg.messageId)) ||
+      (sameText && (this.recentOut.get(sameText) ?? 0) > Date.now())
+    ) {
       for (const r of rules)
         await this.log(
           r,
@@ -1204,6 +1214,14 @@ export class BridgeService {
   ) {
     for (let attempt = 0; ; attempt++) {
       try {
+        // Written before the send: the echo can arrive before the send even returns.
+        const mark = this.echoText(rule.dstPlatform, rule.dstChatId, out.text);
+        if (mark) {
+          this.recentOut.set(mark, Date.now() + 120_000);
+          if (this.recentOut.size > 3000)
+            for (const [k, until] of this.recentOut)
+              if (until < Date.now()) this.recentOut.delete(k);
+        }
         const id = await withTimeout(
           dst.send(dest, out),
           out.filePath ? (this.deps.uploadTimeoutMs ?? 300_000) : 60_000,
