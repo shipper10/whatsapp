@@ -66,6 +66,10 @@ export interface WhatsAppProvider {
   editText?(conversationId: string, messageId: string, text: string): Promise<boolean>;
   /** Returns null when nothing fresh is cached (or re-sending failed), so the caller sends normally. */
   sendCached?(msg: CachedSend): Promise<SendResult | null>;
+  /** How many parts were stored for this file's key (0 = none): parts are kept as `key#i/n`. */
+  partCount?(key: string): Promise<number>;
+  /** True when every key is remembered and still fresh (so a multi-part file can be re-sent as a whole). */
+  hasCached?(keys: string[], ttlMs: number): Promise<boolean>;
   /** Number of files currently remembered for re-sending. */
   cacheSize?(): number;
 }

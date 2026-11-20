@@ -2,6 +2,7 @@ import type { WAMessage } from "@whiskeysockets/baileys";
 import { BufferJSON, initAuthCreds } from "@whiskeysockets/baileys";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../src/db/client.js";
+import { DbUploadCache } from "../src/delivery/uploadCache.js";
 import { useDbAuthState } from "../src/providers/whatsapp/baileys/authState.js";
 import { extractIncoming } from "../src/providers/whatsapp/baileys/extract.js";
 import { BaileysProvider, type SocketLike } from "../src/providers/whatsapp/baileys/provider.js";
@@ -293,5 +294,25 @@ describe("BaileysProvider", () => {
     expect(sockets.length).toBe(1);
     expect(p.status().state).toBe("replaced");
     await p.stop();
+  });
+});
+
+describe("upload cache that survives restarts", () => {
+  it("stores, reloads and finds parts in the database", async () => {
+    const db = await createTestDb();
+    const cache = new DbUploadCache(db);
+    const msg = { key: { id: "X" }, message: { documentMessage: { mediaKey: Buffer.from("mk") } } };
+    await cache.save("k#1/2", { msg: msg as never, followUpText: "t", at: Date.now() });
+    await cache.save("k#2/2", { msg: msg as never, at: Date.now() });
+    const back = await cache.load("k#1/2");
+    expect(back?.followUpText).toBe("t");
+    expect(
+      Buffer.from(
+        (back?.msg.message as { documentMessage: { mediaKey: Buffer } }).documentMessage.mediaKey,
+      ).toString(),
+    ).toBe("mk");
+    expect((await cache.keysWith("k#1/")).sort()).toEqual(["k#1/2"]);
+    await cache.remove("k#1/2");
+    expect(await cache.load("k#1/2")).toBeUndefined();
   });
 });

@@ -270,6 +270,15 @@ export class FileDeliverer implements Deliverer {
         done();
         return { status: "sent" };
       }
+      // A big audio sent in parts: every part is remembered, so no download, no splitting, no upload.
+      const n = await this.partsFromCache(key, ttlMs);
+      if (n) {
+        const ok = await this.resendParts(key, ttlMs, n, caption, target).catch(() => false);
+        if (ok) {
+          done();
+          return { status: "sent" };
+        }
+      }
     }
     try {
       return await this.transfer(typeOk, {
@@ -286,6 +295,40 @@ export class FileDeliverer implements Deliverer {
     } finally {
       if (key) done();
     }
+  }
+
+  /** How many parts of this file are all still in the cache (0 = not as a whole). */
+  private async partsFromCache(key: string, ttlMs: number): Promise<number> {
+    if (!this.d.provider.partCount || !this.d.provider.hasCached || !this.d.provider.sendCached)
+      return 0;
+    const n = await this.d.provider.partCount(key);
+    if (!n) return 0;
+    const keys = Array.from({ length: n }, (_, i) => partKey(key, i, n));
+    return (await this.d.provider.hasCached(keys, ttlMs)) ? n : 0;
+  }
+
+  private async resendParts(
+    key: string,
+    ttlMs: number,
+    n: number,
+    caption: string,
+    target: DeliveryTarget,
+  ): Promise<boolean> {
+    await this.d.provider.sendText({
+      conversationId: target.conversationId,
+      text: `${caption}\n\n${splitNotice(n)}`,
+      quoteMessageId: target.quoteMessageId,
+    });
+    for (let i = 0; i < n; i++) {
+      const res = await this.d.provider.sendCached?.({
+        conversationId: target.conversationId,
+        cache: { key: partKey(key, i, n), ttlMs },
+        caption: partLabel(i + 1, n),
+        quoteMessageId: target.quoteMessageId,
+      });
+      if (!res?.confirmed) return false;
+    }
+    return true;
   }
 
   private async transfer(
@@ -365,6 +408,7 @@ export class FileDeliverer implements Deliverer {
               audioMode,
               partMb,
               opusAsMp3,
+              o.cache,
             );
           // "document": the whole file as one attachment (planMedia sends anything over the limit that way).
         }
@@ -407,6 +451,7 @@ export class FileDeliverer implements Deliverer {
     audioMode: "audio" | "document",
     partMb: number,
     opusAsMp3 = false,
+    cache?: { key: string; ttlMs: number },
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
     const split = await splitAudio(file.path, file.fileName, dir, partMb * 1000 * 1000).catch(
       () => null,
@@ -430,12 +475,15 @@ export class FileDeliverer implements Deliverer {
         audioAsDocument: audioMode === "document",
         opusAsMp3,
         onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
+        cache: cache ? { key: partKey(cache.key, i, n), ttlMs: cache.ttlMs } : undefined,
       });
       if (!res.confirmed) return { status: "failed", error: res.error ?? "SendNotConfirmed" };
     }
     return { status: "sent" };
   }
 }
+
+const partKey = (key: string, i: number, n: number) => `${key}#${i + 1}/${n}`;
 
 const splitNotice = (n: number) =>
   `✂️ This audio is over WhatsApp's 16 MB limit, so it is sent as ${n} parts in order. For the full file in one piece use the links above.`;

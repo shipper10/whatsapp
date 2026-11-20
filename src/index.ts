@@ -21,6 +21,7 @@ import { DriveFetcher } from "./delivery/driveFetcher.js";
 import { type FileFetcher, sweepTempDir } from "./delivery/fetchers.js";
 import { FileDeliverer } from "./delivery/fileDeliverer.js";
 import { TelegramFetcher } from "./delivery/telegramFetcher.js";
+import { DbUploadCache } from "./delivery/uploadCache.js";
 import { GoogleDriveClient, resolveCredentialPath } from "./drive/client.js";
 import { materializeGoogleCredentials } from "./drive/credentials.js";
 import { DbDriveStore } from "./drive/store.js";
@@ -104,6 +105,7 @@ const baileys =
         onRawUpdate: env.BRIDGE_ENABLED ? (u) => bridgeUpdateTap?.(u as never) : undefined,
         onRawReaction: env.BRIDGE_ENABLED ? (l) => bridgeReactionTap?.(l as never) : undefined,
         minSendGapMs: () => settings.get("whatsapp.minSendGapMs"),
+        uploadCache: new DbUploadCache(db),
       })
     : null;
 const replies = new ReplyTracker();

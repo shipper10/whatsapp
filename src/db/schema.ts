@@ -16,6 +16,15 @@ import {
 const now = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const touched = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
+/** Files already uploaded to WhatsApp, so a restart does not make people wait for a second download and upload. */
+export const deliveryCache = pgTable("delivery_cache", {
+  key: text("key").primaryKey(),
+  /** The sent WhatsApp message (BufferJSON), re-forwarded to the next person who asks for the same file. */
+  raw: text("raw").notNull(),
+  followUpText: text("follow_up_text"),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Runtime-editable, non-secret settings. Registry of keys lives in src/settings/registry.ts. */
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),

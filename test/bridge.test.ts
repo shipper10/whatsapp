@@ -598,6 +598,7 @@ describe("bridge migrations", () => {
       "0010_bridge_accounts",
       "0011_bridge_reactions_private",
       "0012_bridge_repliers",
+      "0013_delivery_cache",
     ])
       for (const part of readFileSync(`drizzle/${f}.sql`, "utf8").split("--> statement-breakpoint"))
         await db.execute(sql.raw(part));

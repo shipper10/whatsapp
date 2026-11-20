@@ -58,6 +58,9 @@ export class ReplyTracker {
         return res ?? null;
       };
     }
+    if (inner.partCount) wrapped.partCount = (k) => inner.partCount?.(k) ?? Promise.resolve(0);
+    if (inner.hasCached)
+      wrapped.hasCached = (k, t) => inner.hasCached?.(k, t) ?? Promise.resolve(false);
     if (inner.cacheSize) wrapped.cacheSize = () => inner.cacheSize?.() ?? 0;
     if (inner.editText)
       wrapped.editText = (c, id, text) => inner.editText?.(c, id, text) ?? Promise.resolve(false);

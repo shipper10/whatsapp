@@ -53,6 +53,13 @@ export class FakeProvider implements WhatsAppProvider {
   /** Keys remembered for re-sending, and the re-sends that happened. */
   cached = new Map<string, boolean>();
   resent: { key: string; caption?: string }[] = [];
+  async partCount(key: string): Promise<number> {
+    const k = [...this.cached.keys()].find((x) => x.startsWith(`${key}#1/`));
+    return k ? Number(k.split("/")[1]) : 0;
+  }
+  async hasCached(keys: string[]): Promise<boolean> {
+    return keys.every((k) => this.cached.has(k));
+  }
   async sendCached(m: { cache: { key: string }; caption?: string }): Promise<SendResult | null> {
     if (!this.cached.has(m.cache.key)) return null;
     this.resent.push({ key: m.cache.key, caption: m.caption });

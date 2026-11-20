@@ -1,5 +1,8 @@
+import { createWriteStream } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { AnyMessageContent, WAMessage } from "@whiskeysockets/baileys";
 import { BufferJSON, jidNormalizedUser, normalizeMessageContent } from "@whiskeysockets/baileys";
 import { planMedia } from "../providers/whatsapp/baileys/media.js";
@@ -106,7 +109,7 @@ export function applyMentions(
 export function whatsappToBridge(
   m: WAMessage,
   titleOf: (jid: string) => string,
-  download: (m: WAMessage) => Promise<Buffer>,
+  download: (m: WAMessage) => Promise<Buffer | Readable>,
   savedName?: (jids: (string | undefined)[]) => string | undefined,
   mentionName?: (jid: string) => string | undefined,
 ): BridgeMessage | null {
@@ -227,7 +230,9 @@ export function whatsappToBridge(
       ? async (dir) => {
           await mkdir(dir, { recursive: true });
           const path = join(dir, `wa-${key.id}.${extFor(mimeType, fileName)}`);
-          await writeFile(path, await download(m));
+          const data = await download(m);
+          if (Buffer.isBuffer(data)) await writeFile(path, data);
+          else await pipeline(data, createWriteStream(path));
           return path;
         }
       : undefined,
@@ -270,7 +275,7 @@ export class WhatsAppBridgeEndpoint implements BridgeEndpoint {
     return whatsappToBridge(
       m,
       this.titleOf,
-      (x) => this.wa.downloadBuffer(x),
+      (x) => this.wa.downloadStream(x),
       (jids) => this.wa.savedNameOf(...jids),
       this.mentionName,
     );

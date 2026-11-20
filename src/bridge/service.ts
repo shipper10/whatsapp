@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { Semaphore } from "../core/concurrency.js";
 import { stickerToPng } from "./convert.js";
 import {
   buildOutgoing,
@@ -115,6 +116,8 @@ export class BridgeService {
   private readonly lanes = new Map<string, Promise<unknown>>();
   /** Sends in progress per destination chat; an own-account event for that chat may be the echo of one. */
   private readonly inflight = new Map<string, number>();
+  /** Big transfers run two at a time, so a burst of media cannot starve the library bot of memory and CPU. */
+  private readonly heavy = new Semaphore(2);
   /** What the bridge just wrote where (second loop guard, by content): key -> expiry time. */
   private readonly recentOut = new Map<string, number>();
   private echoText(platform: Platform, chatId: string, text: string | undefined) {
@@ -754,8 +757,8 @@ export class BridgeService {
           const eff = await this.effectiveRule(job, rule);
           if (!eff) return void (await store.complete(job.id));
           try {
-            if (job.kind === "send") await this.runSend(job, eff);
-            else if (job.kind === "album") await this.runAlbum(job, eff);
+            if (job.kind === "send") await this.heavy.run(() => this.runSend(job, eff));
+            else if (job.kind === "album") await this.heavy.run(() => this.runAlbum(job, eff));
             else if (job.kind === "edit") await this.runEdit(job, eff);
             else await this.runDelete(job, eff);
             break;

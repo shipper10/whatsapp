@@ -480,6 +480,21 @@ describe("size limits by kind", () => {
     expect(provider.docs[0]?.fileName).toBe("talk.mp3");
   });
 
+  it("re-sends the remembered parts of a big audio without downloading it again", async () => {
+    const f = new BigFetcher("talk.mp3", "audio/mpeg");
+    const { provider, deliverer } = await setup(detail([src("talk.mp3", "audio/mpeg")]), [f], {
+      "delivery.largeAudioMode": "split",
+    });
+    const key = `tg:${tg.telegramChatId}:${tg.telegramMessageId}:${big}`;
+    provider.cached.set(`${key}#1/2`, true);
+    provider.cached.set(`${key}#2/2`, true);
+    await deliverer.deliver(1, target);
+    expect(f.calls).toBe(0);
+    expect(provider.docs).toHaveLength(0);
+    expect(provider.resent.map((r) => r.caption)).toEqual(["🎧 Part 1 of 2", "🎧 Part 2 of 2"]);
+    expect(provider.sent.some((m) => m.text.includes("2 parts"))).toBe(true);
+  });
+
   it("gives links only for big audio when the mode is links", async () => {
     const f = new BigFetcher("talk.mp3", "audio/mpeg");
     const { provider, deliverer } = await setup(detail([src("talk.mp3", "audio/mpeg")]), [f], {

@@ -1,4 +1,5 @@
 import { open, stat } from "node:fs/promises";
+import type { Readable } from "node:stream";
 import type {
   AnyMessageContent,
   AuthenticationState,
@@ -88,6 +89,14 @@ export interface BaileysDeps {
   baileysLogger: unknown;
   onMessage: (id: string, msg: IncomingMessage) => Promise<void>;
   minSendGapMs: () => Promise<number>;
+  /** Where uploaded files are remembered across restarts (optional: the cache then lives in memory only). */
+  uploadCache?: {
+    load(key: string): Promise<CachedUpload | undefined>;
+    save(key: string, v: CachedUpload): Promise<void>;
+    remove(key: string): Promise<void>;
+    /** Keys that start with this prefix. */
+    keysWith(prefix: string): Promise<string[]>;
+  };
   /** Bridge tap: every message event (including the account's own), before the bot's own filtering. */
   onRawMessage?: (m: WAMessage) => void;
   /** Bridge tap: message updates (edits and revocations arrive here). */
@@ -106,7 +115,7 @@ export interface BaileysDeps {
 const RECENT_MAX = 300;
 const CACHE_MAX = 200;
 
-interface CachedUpload {
+export interface CachedUpload {
   msg: WAMessage;
   followUpText?: string;
   at: number;
@@ -506,6 +515,11 @@ export class BaileysProvider implements WhatsAppProvider {
   private remember_(key: string, v: CachedUpload): void {
     this.uploaded.delete(key);
     this.uploaded.set(key, v);
+    void this.deps.uploadCache
+      ?.save(key, v)
+      .catch((err) =>
+        this.deps.logger.warn({ err: String(err) }, "could not store the upload cache entry"),
+      );
     if (this.uploaded.size > CACHE_MAX) {
       const oldest = this.uploaded.keys().next().value;
       if (oldest !== undefined) this.uploaded.delete(oldest);
@@ -520,13 +534,38 @@ export class BaileysProvider implements WhatsAppProvider {
    * Re-forwards a file we already uploaded: WhatsApp reuses the stored media, so nothing is downloaded
    * from Telegram/Drive and nothing is uploaded again. Any failure returns null and the caller sends normally.
    */
-  sendCached(msg: CachedSend): Promise<SendResult | null> {
-    const hit = this.uploaded.get(msg.cache.key);
-    if (!hit) return Promise.resolve(null);
-    if (Date.now() - hit.at > msg.cache.ttlMs) {
-      this.uploaded.delete(msg.cache.key);
-      return Promise.resolve(null);
+  /** A fresh remembered upload: from memory, else from the database (it survives restarts). */
+  private async cachedUpload(key: string, ttlMs: number): Promise<CachedUpload | undefined> {
+    let hit = this.uploaded.get(key);
+    if (!hit && this.deps.uploadCache) {
+      hit = await this.deps.uploadCache.load(key).catch(() => undefined);
+      if (hit) this.uploaded.set(key, hit);
     }
+    if (hit && Date.now() - hit.at > ttlMs) {
+      this.uploaded.delete(key);
+      void this.deps.uploadCache?.remove(key).catch(() => undefined);
+      return undefined;
+    }
+    return hit;
+  }
+
+  async partCount(key: string): Promise<number> {
+    const prefix = `${key}#1/`;
+    const keys = new Set([...this.uploaded.keys()].filter((k) => k.startsWith(prefix)));
+    for (const k of (await this.deps.uploadCache?.keysWith(prefix).catch(() => [])) ?? [])
+      keys.add(k);
+    const first = [...keys][0];
+    return first ? Number(first.slice(prefix.length)) || 0 : 0;
+  }
+
+  async hasCached(keys: string[], ttlMs: number): Promise<boolean> {
+    for (const k of keys) if (!(await this.cachedUpload(k, ttlMs))) return false;
+    return keys.length > 0;
+  }
+
+  async sendCached(msg: CachedSend): Promise<SendResult | null> {
+    const hit = await this.cachedUpload(msg.cache.key, msg.cache.ttlMs);
+    if (!hit) return null;
     return this.enqueue(async () => {
       // Documents with a caption arrive wrapped; unwrap so the caption can be replaced.
       const m = normalizeMessageContent(hit.msg.message) as
@@ -548,6 +587,7 @@ export class BaileysProvider implements WhatsAppProvider {
       );
       if (!res.confirmed) {
         this.uploaded.delete(msg.cache.key);
+        void this.deps.uploadCache?.remove(msg.cache.key).catch(() => undefined);
         this.deps.logger.warn(
           { error: res.error },
           "re-forwarding a cached file failed; sending normally",
@@ -645,20 +685,20 @@ export class BaileysProvider implements WhatsAppProvider {
     return Object.values(await this.sock.groupFetchAllParticipating());
   }
 
-  /** Bridge: downloads a received media message into memory. */
-  async downloadBuffer(m: WAMessage): Promise<Buffer> {
+  /** Bridge: downloads a received media message as a stream, so big files never sit in memory. */
+  async downloadStream(m: WAMessage): Promise<Readable> {
     const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
     const sock = this.sock;
     return downloadMediaMessage(
       m,
-      "buffer",
+      "stream",
       {},
       {
         logger: this.deps.baileysLogger as never,
         reuploadRequest: (x: WAMessage) =>
           sock?.updateMediaMessage?.(x) ?? Promise.reject(new Error("whatsapp not connected")),
       },
-    );
+    ) as Promise<Readable>;
   }
 
   /** For operators: wipe the stored login so the next start shows a fresh QR. */
