@@ -215,6 +215,10 @@ export class WhatsAppProgress implements ProgressSink {
     }
     const pct = (this.upSent / this.upTotal) * 100;
     const stalled = Math.round((now - this.lastAdvanceAt) / 1000);
+    if (stalled >= 45 && this.upSent >= this.upTotal) {
+      // Every byte has left; what is left is WhatsApp's own processing and confirmation.
+      return `${head} ${bar(100)} ⏳ uploaded, waiting for WhatsApp to confirm (${stalled}s)`;
+    }
     if (stalled >= 45) {
       return `${head} ${bar(pct)} ⚠️ no progress for ${stalled}s (connection may be slow)`;
     }

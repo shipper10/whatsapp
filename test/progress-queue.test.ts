@@ -173,4 +173,31 @@ describe("upload progress display", () => {
     p.fileDone(true);
     await p.end();
   });
+
+  it("says WhatsApp is confirming (not a slow connection) once every byte has been sent", async () => {
+    const f = fakeProvider();
+    let t = 1_000_000;
+    const p = new WhatsAppProgress({
+      provider: f.provider,
+      conversationId: "c",
+      minBytes: 0,
+      minEditGapMs: 0,
+      now: () => t,
+    });
+    await p.begin(1);
+    p.file("a.mp3", 16e6);
+    const up = p.uploading();
+    t += 1000;
+    await up;
+    t += 1000;
+    p.uploadProgress(16e6, 16e6);
+    t += 60_000;
+    p.uploadProgress(16e6, 16e6);
+    await new Promise((r) => setTimeout(r, 10));
+    const last = [...f.sent, ...f.edits].at(-1) ?? "";
+    expect(last).toContain("waiting for WhatsApp to confirm");
+    expect(last).not.toContain("slow");
+    p.fileDone(true);
+    await p.end();
+  });
 });

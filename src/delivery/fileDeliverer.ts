@@ -30,7 +30,7 @@ export interface FileDelivererDeps {
   log: DeliveryLog;
   tempDir: string;
   concurrency: number;
-  logger: { warn: (o: object, m?: string) => void };
+  logger: { warn: (o: object, m?: string) => void; info?: (o: object, m?: string) => void };
   /** Test hook; defaults to the real free space of the temp disk. */
   freeDiskMb?: (dir: string) => Promise<number | null>;
 }
@@ -453,9 +453,11 @@ export class FileDeliverer implements Deliverer {
     opusAsMp3 = false,
     cache?: { key: string; ttlMs: number },
   ): Promise<{ status: "sent" | "failed" | "too_large"; error?: string }> {
+    const t0 = Date.now();
     const split = await splitAudio(file.path, file.fileName, dir, partMb * 1000 * 1000).catch(
       () => null,
     );
+    this.d.logger.info?.({ ms: Date.now() - t0, parts: split?.files.length }, "audio split");
     if (!split) return { status: "too_large" };
     const n = split.files.length;
     await this.d.provider.sendText({
@@ -465,6 +467,7 @@ export class FileDeliverer implements Deliverer {
     });
     for (const [i, path] of split.files.entries()) {
       await target.progress?.uploading();
+      const started = Date.now();
       const res = await this.d.provider.sendDocument({
         conversationId: target.conversationId,
         filePath: path,
@@ -477,6 +480,10 @@ export class FileDeliverer implements Deliverer {
         onUploadProgress: (sent, total) => target.progress?.uploadProgress?.(sent, total),
         cache: cache ? { key: partKey(cache.key, i, n), ttlMs: cache.ttlMs } : undefined,
       });
+      this.d.logger.info?.(
+        { part: i + 1, of: n, secs: Math.round((Date.now() - started) / 1000), ok: res.confirmed },
+        "audio part sent",
+      );
       if (!res.confirmed) return { status: "failed", error: res.error ?? "SendNotConfirmed" };
     }
     return { status: "sent" };
